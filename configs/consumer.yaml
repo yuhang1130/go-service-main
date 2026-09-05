@@ -1,0 +1,35 @@
+environment: local
+server:
+  management_port: 9092
+  read_header_timeout: 5s
+  read_timeout: 10s
+  write_timeout: 10s
+  idle_timeout: 60s
+  shutdown_timeout: 30s
+  max_header_bytes: 1048576
+  max_body_bytes: 1048576
+logging:
+  level: info
+  format: text
+mysql:
+  dsn: root:mysql_12345@tcp(127.0.0.1:13306)/go_main?charset=utf8mb4&parseTime=true&loc=UTC
+  max_open_conns: 25
+  max_idle_conns: 10
+  conn_max_lifetime: 30m
+  conn_max_idle_time: 5m
+redis:
+  address: 127.0.0.1:16379
+  password: redis_12345
+  database: 0
+  dial_timeout: 3s
+  read_timeout: 2s
+  write_timeout: 2s
+rocketmq:
+  endpoints: 127.0.0.1:18081
+  topic_prefix: go-service-main-local
+  consumer_group: go-service-main-consumer-local
+  await_duration: 5s
+  handler_timeout: 30s
+  topics: [events]
+  concurrency: 8
+  max_body_bytes: 1048576

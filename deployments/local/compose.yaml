@@ -1,0 +1,62 @@
+name: go-service-main
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: app
+      MYSQL_USER: app
+      MYSQL_PASSWORD: app
+      MYSQL_ROOT_PASSWORD: local-root-only
+      TZ: UTC
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uapp", "-papp"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  rocketmq-namesrv:
+    image: apache/rocketmq:5.5.0
+    command: sh mqnamesrv
+
+  rocketmq-broker:
+    image: apache/rocketmq:5.5.0
+    command: sh mqbroker -c /home/rocketmq/broker.conf
+    depends_on:
+      - rocketmq-namesrv
+    environment:
+      NAMESRV_ADDR: rocketmq-namesrv:9876
+    volumes:
+      - ./rocketmq/broker.conf:/home/rocketmq/broker.conf:ro
+
+  rocketmq-proxy:
+    image: apache/rocketmq:5.5.0
+    command: sh mqproxy -pc /home/rocketmq/rmq-proxy.json
+    depends_on:
+      - rocketmq-namesrv
+      - rocketmq-broker
+    restart: on-failure
+    environment:
+      NAMESRV_ADDR: rocketmq-namesrv:9876
+    ports:
+      - "18081:18081"
+    volumes:
+      - ./rocketmq/rmq-proxy.json:/home/rocketmq/rmq-proxy.json:ro
+
+volumes:
+  mysql-data:
+  redis-data:

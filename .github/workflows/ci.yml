@@ -1,0 +1,73 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: ['1.26.x', '1.27.x']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+      - run: make check-format check-migrations vet test openapi-check build
+
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.x'
+          cache: true
+      - run: make lint vulncheck
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: app
+          MYSQL_USER: app
+          MYSQL_PASSWORD: app
+          MYSQL_ROOT_PASSWORD: local-root-only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uapp -papp"
+          --health-interval=5s --health-timeout=3s --health-retries=20
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=3s --health-retries=20
+    env:
+      APP_MYSQL_DSN: app:app@tcp(127.0.0.1:3306)/app?charset=utf8mb4&parseTime=true&loc=UTC
+      APP_REDIS_ADDRESS: 127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.x'
+          cache: true
+      - name: Initialize disposable test database
+        run: |
+          mysql_container=$(docker ps --filter 'ancestor=mysql:8.4' --format '{{.ID}}' | head -n 1)
+          test -n "$mysql_container"
+          while IFS= read -r sql_file; do
+            docker exec -i -e MYSQL_PWD=app "$mysql_container" mysql --user=app app < "$sql_file"
+          done < <(find migrations -type f -name '*.up.sql' -print | sort)
+      - run: make test-integration

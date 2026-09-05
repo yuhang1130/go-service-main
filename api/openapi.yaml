@@ -1,0 +1,747 @@
+openapi: 3.1.0
+info:
+  title: go-service-main API
+  version: 0.4.0
+  description: Single-tenant administration API compatible with vue3-element-admin.
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/auth/captcha:
+    get:
+      operationId: getCaptcha
+      security: []
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+        '400': { $ref: '#/components/responses/AdminAPIError' }
+        '401': { $ref: '#/components/responses/AdminAPIError' }
+  /api/v1/auth/refresh-token:
+    post:
+      operationId: refreshToken
+      security: []
+      parameters:
+        - in: query
+          name: refreshToken
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+        '401': { $ref: '#/components/responses/AdminAPIError' }
+  /api/v1/auth/logout:
+    delete:
+      operationId: logout
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      parameters:
+        - { in: query, name: pageNum, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: pageSize, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { in: query, name: keywords, schema: { type: string } }
+        - { in: query, name: status, schema: { type: integer, enum: [0, 1] } }
+        - { in: query, name: deptId, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    post:
+      operationId: createUser
+      requestBody: { $ref: '#/components/requestBodies/UserForm' }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+        '400': { $ref: '#/components/responses/AdminAPIError' }
+        '403': { $ref: '#/components/responses/AdminAPIError' }
+        '409': { $ref: '#/components/responses/AdminAPIError' }
+  /api/v1/users/me:
+    get:
+      operationId: getCurrentUser
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/users/options:
+    get:
+      operationId: getUserOptions
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/users/profile:
+    get:
+      operationId: getUserProfile
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    put:
+      operationId: updateUserProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProfileForm' }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/users/password:
+    put:
+      operationId: changeCurrentUserPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordChangeForm' }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+        '400': { $ref: '#/components/responses/AdminAPIError' }
+  /api/v1/users/{userId}/form:
+    parameters:
+      - $ref: '#/components/parameters/UserID'
+    get:
+      operationId: getUserForm
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+        '404': { $ref: '#/components/responses/AdminAPIError' }
+  /api/v1/users/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserID'
+    put:
+      operationId: updateUser
+      requestBody: { $ref: '#/components/requestBodies/UserForm' }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+        '404': { $ref: '#/components/responses/AdminAPIError' }
+    delete:
+      operationId: deleteUsers
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+        '403': { $ref: '#/components/responses/AdminAPIError' }
+  /api/v1/users/{userId}/status:
+    parameters:
+      - $ref: '#/components/parameters/UserID'
+      - { in: query, name: status, required: true, schema: { type: integer, enum: [0, 1] } }
+    patch:
+      operationId: updateUserStatus
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/users/{userId}/password/reset:
+    parameters:
+      - $ref: '#/components/parameters/UserID'
+      - { in: query, name: password, required: true, schema: { type: string, minLength: 8 } }
+    put:
+      operationId: resetUserPassword
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/users/template:
+    get:
+      operationId: downloadUserImportTemplate
+      responses:
+        '200': { description: XLSX workbook }
+  /api/v1/users/export:
+    get:
+      operationId: exportUsers
+      responses:
+        '200': { description: XLSX workbook }
+  /api/v1/users/import:
+    post:
+      operationId: importUsers
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+        '400': { $ref: '#/components/responses/AdminAPIError' }
+  /api/v1/roles:
+    get:
+      operationId: listRoles
+      parameters:
+        - { in: query, name: pageNum, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: pageSize, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { in: query, name: keywords, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    post:
+      operationId: createRole
+      requestBody: { $ref: '#/components/requestBodies/RoleForm' }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/roles/options:
+    get:
+      operationId: getRoleOptions
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/roles/{roleId}/form:
+    parameters:
+      - $ref: '#/components/parameters/RoleID'
+    get:
+      operationId: getRoleForm
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/roles/{roleId}:
+    parameters:
+      - $ref: '#/components/parameters/RoleID'
+    put:
+      operationId: updateRole
+      requestBody: { $ref: '#/components/requestBodies/RoleForm' }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    delete:
+      operationId: deleteRoles
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/roles/{roleId}/menu-ids:
+    parameters:
+      - $ref: '#/components/parameters/RoleID'
+    get:
+      operationId: getRoleMenuIDs
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/roles/{roleId}/menus:
+    parameters:
+      - $ref: '#/components/parameters/RoleID'
+    put:
+      operationId: updateRoleMenus
+      requestBody: { $ref: '#/components/requestBodies/IDList' }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/roles/{roleId}/dept-ids:
+    parameters:
+      - $ref: '#/components/parameters/RoleID'
+    get:
+      operationId: getRoleDepartmentIDs
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/roles/{roleId}/depts:
+    parameters:
+      - $ref: '#/components/parameters/RoleID'
+    put:
+      operationId: updateRoleDepartments
+      requestBody: { $ref: '#/components/requestBodies/IDList' }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/menus:
+    get:
+      operationId: listMenus
+      parameters:
+        - { in: query, name: keywords, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    post:
+      operationId: createMenu
+      requestBody: { $ref: '#/components/requestBodies/MenuForm' }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/menus/options:
+    get:
+      operationId: getMenuOptions
+      parameters:
+        - { in: query, name: onlyParent, schema: { type: boolean } }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/menus/routes:
+    get:
+      operationId: getCurrentUserRoutes
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/menus/{menuId}/form:
+    parameters:
+      - $ref: '#/components/parameters/MenuID'
+    get:
+      operationId: getMenuForm
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/menus/{menuId}:
+    parameters:
+      - $ref: '#/components/parameters/MenuID'
+    put:
+      operationId: updateMenu
+      requestBody: { $ref: '#/components/requestBodies/MenuForm' }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    delete:
+      operationId: deleteMenu
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/depts:
+    get:
+      operationId: listDepartments
+      parameters:
+        - { in: query, name: keywords, schema: { type: string } }
+        - { in: query, name: status, schema: { type: integer, enum: [0, 1] } }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    post:
+      operationId: createDepartment
+      requestBody: { $ref: '#/components/requestBodies/DepartmentForm' }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/depts/options:
+    get:
+      operationId: getDepartmentOptions
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/depts/{deptId}/form:
+    parameters:
+      - $ref: '#/components/parameters/DepartmentID'
+    get:
+      operationId: getDepartmentForm
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/depts/{deptId}:
+    parameters:
+      - $ref: '#/components/parameters/DepartmentID'
+    put:
+      operationId: updateDepartment
+      requestBody: { $ref: '#/components/requestBodies/DepartmentForm' }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    delete:
+      operationId: deleteDepartments
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/dicts:
+    get:
+      operationId: listDictionaries
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    post:
+      operationId: createDictionary
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/dicts/options:
+    get:
+      operationId: getDictionaryOptions
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/dicts/{dictId}/form:
+    parameters:
+      - { in: path, name: dictId, required: true, schema: { type: string } }
+    get:
+      operationId: getDictionaryForm
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/dicts/{dictId}:
+    parameters:
+      - { in: path, name: dictId, required: true, schema: { type: string } }
+    put:
+      operationId: updateDictionary
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    delete:
+      operationId: deleteDictionary
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/dicts/{dictCode}/items:
+    parameters:
+      - { in: path, name: dictCode, required: true, schema: { type: string } }
+    get:
+      operationId: listDictionaryItems
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    post:
+      operationId: createDictionaryItem
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/dicts/{dictCode}/items/options:
+    parameters:
+      - { in: path, name: dictCode, required: true, schema: { type: string } }
+    get:
+      operationId: getDictionaryItemOptions
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/dicts/{dictCode}/items/{itemId}/form:
+    parameters:
+      - { in: path, name: dictCode, required: true, schema: { type: string } }
+      - { in: path, name: itemId, required: true, schema: { type: string } }
+    get:
+      operationId: getDictionaryItemForm
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/dicts/{dictCode}/items/{itemId}:
+    parameters:
+      - { in: path, name: dictCode, required: true, schema: { type: string } }
+      - { in: path, name: itemId, required: true, schema: { type: string } }
+    put:
+      operationId: updateDictionaryItem
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    delete:
+      operationId: deleteDictionaryItems
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/configs:
+    get:
+      operationId: listSystemConfigs
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    post:
+      operationId: createSystemConfig
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/configs/refresh:
+    put:
+      operationId: refreshSystemConfigCache
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    post:
+      operationId: refreshSystemConfigCacheCompatible
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/configs/refresh/{key}:
+    parameters:
+      - { in: path, name: key, required: true, schema: { type: string } }
+    post:
+      operationId: refreshSystemConfigCacheByKey
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/configs/key/{key}:
+    parameters:
+      - { in: path, name: key, required: true, schema: { type: string } }
+    get:
+      operationId: getSystemConfigByKey
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/configs/{configId}/form:
+    parameters:
+      - { in: path, name: configId, required: true, schema: { type: string } }
+    get:
+      operationId: getSystemConfigForm
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/configs/{configId}:
+    parameters:
+      - { in: path, name: configId, required: true, schema: { type: string } }
+    get:
+      operationId: getSystemConfig
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    put:
+      operationId: updateSystemConfig
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    delete:
+      operationId: deleteSystemConfigs
+      description: configId may contain one ID or comma-separated IDs.
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/notices:
+    get:
+      operationId: listNotices
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    post:
+      operationId: createNotice
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/notices/my:
+    get:
+      operationId: listMyNotices
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/notices/read-all:
+    put:
+      operationId: markAllNoticesRead
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/notices/unread-count:
+    get:
+      operationId: getUnreadNoticeCount
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/notices/{noticeId}/form:
+    parameters:
+      - { in: path, name: noticeId, required: true, schema: { type: string } }
+    get:
+      operationId: getNoticeForm
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/notices/{noticeId}/detail:
+    parameters:
+      - { in: path, name: noticeId, required: true, schema: { type: string } }
+    get:
+      operationId: getNoticeDetail
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/notices/{noticeId}:
+    parameters:
+      - { in: path, name: noticeId, required: true, schema: { type: string } }
+    put:
+      operationId: updateNotice
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    delete:
+      operationId: deleteNotices
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/notices/{noticeId}/publish:
+    parameters:
+      - { in: path, name: noticeId, required: true, schema: { type: string } }
+    put:
+      operationId: publishNotice
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/notices/{noticeId}/revoke:
+    parameters:
+      - { in: path, name: noticeId, required: true, schema: { type: string } }
+    put:
+      operationId: revokeNotice
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/logs:
+    get:
+      operationId: listOperationLogs
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/logs/analytics/trend:
+    get:
+      operationId: getOperationLogTrend
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/logs/analytics/overview:
+    get:
+      operationId: getOperationLogOverview
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/files:
+    post:
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+    delete:
+      operationId: deleteFile
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/files/batch:
+    post:
+      operationId: uploadFiles
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  maxItems: 20
+                  items: { type: string, format: binary }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/files/image:
+    post:
+      operationId: uploadImage
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+  /api/v1/files/content/{path}:
+    parameters:
+      - { in: path, name: path, required: true, schema: { type: string } }
+    get:
+      operationId: downloadFile
+      security: []
+      responses:
+        '200': { description: Stored file bytes }
+  /api/v1/sse/connect:
+    get:
+      operationId: connectSSE
+      responses:
+        '200':
+          description: Named SSE event stream with heartbeat comments.
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /api/v1/sse/online-count:
+    get:
+      operationId: getOnlineUserCount
+      responses:
+        '200': { $ref: '#/components/responses/AdminAPISuccess' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    UserID:
+      in: path
+      name: userId
+      required: true
+      schema: { type: string }
+    RoleID:
+      in: path
+      name: roleId
+      required: true
+      schema: { type: string }
+    MenuID:
+      in: path
+      name: menuId
+      required: true
+      schema: { type: string }
+    DepartmentID:
+      in: path
+      name: deptId
+      required: true
+      schema: { type: string }
+    IDs:
+      in: path
+      name: ids
+      required: true
+      description: One ID or comma-separated IDs.
+      schema: { type: string }
+  requestBodies:
+    UserForm:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/UserForm' }
+    RoleForm:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/RoleForm' }
+    MenuForm:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/MenuForm' }
+    DepartmentForm:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DepartmentForm' }
+    IDList:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: array
+            items: { type: integer, format: int64, minimum: 1 }
+  responses:
+    AdminAPISuccess:
+      description: Successful administration API response.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/AdminAPIResult' }
+    AdminAPIError:
+      description: Administration API error with a stable code.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/AdminAPIResult' }
+  schemas:
+    LoginRequest:
+      type: object
+      required: [username, password, captchaId, captchaCode]
+      properties:
+        username: { type: string, minLength: 1 }
+        password: { type: string, minLength: 1 }
+        captchaId: { type: string, minLength: 1 }
+        captchaCode: { type: string, minLength: 1 }
+    UserForm:
+      type: object
+      required: [username, nickname, status, roleIds]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        nickname: { type: string }
+        mobile: { type: string }
+        gender: { type: integer, minimum: 0, maximum: 2 }
+        avatar: { type: string }
+        email: { type: string }
+        status: { type: integer, enum: [0, 1] }
+        deptId: { type: string }
+        roleIds:
+          type: array
+          items: { type: integer, format: int64 }
+    ProfileForm:
+      type: object
+      required: [nickname, gender]
+      properties:
+        nickname: { type: string }
+        avatar: { type: string }
+        gender: { type: integer, minimum: 0, maximum: 2 }
+    PasswordChangeForm:
+      type: object
+      required: [oldPassword, newPassword, confirmPassword]
+      properties:
+        oldPassword: { type: string }
+        newPassword: { type: string, minLength: 8 }
+        confirmPassword: { type: string, minLength: 8 }
+    RoleForm:
+      type: object
+      required: [name, code, status, dataScope]
+      properties:
+        name: { type: string }
+        code: { type: string }
+        sort: { type: integer }
+        status: { type: integer, enum: [0, 1] }
+        dataScope: { type: integer, minimum: 1, maximum: 5 }
+        deptIds:
+          type: array
+          items: { type: string }
+    MenuForm:
+      type: object
+      required: [name, type, visible]
+      properties:
+        parentId: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [C, M, E, B] }
+        routeName: { type: string }
+        routePath: { type: string }
+        component: { type: string }
+        externalUrl: { type: string }
+        perm: { type: string }
+        alwaysShow: { oneOf: [{ type: boolean }, { type: integer, enum: [0, 1] }] }
+        keepAlive: { oneOf: [{ type: boolean }, { type: integer, enum: [0, 1] }] }
+        visible: { type: integer, enum: [0, 1] }
+        sort: { type: integer }
+        icon: { type: string }
+        redirect: { type: string }
+        params:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              value: { type: string }
+    DepartmentForm:
+      type: object
+      required: [name, code, status]
+      properties:
+        name: { type: string }
+        code: { type: string }
+        parentId: { type: string }
+        sort: { type: integer }
+        status: { type: integer, enum: [0, 1] }
+    AdminAPIResult:
+      type: object
+      required: [code, msg, data]
+      properties:
+        code: { type: string }
+        msg: { type: string }
+        data: {}
+        requestId: { type: string }

@@ -1,0 +1,28 @@
+root = "."
+tmp_dir = ".tmp/air-api"
+env_files = [".env"]
+
+[build]
+  cmd = "CGO_ENABLED=0 go build -trimpath -o ./.tmp/air-api/service ./cmd/api"
+  bin = "./.tmp/air-api/service"
+  entrypoint = ["./.tmp/air-api/service"]
+  include_dir = ["cmd/api", "internal", "configs"]
+  include_ext = ["go", "yaml", "yml"]
+  exclude_dir = [".git", ".tmp", "bin", "migrations", "vendor"]
+  exclude_regex = ["_test.go"]
+  exclude_unchanged = true
+  delay = 300
+  stop_on_error = true
+  send_interrupt = true
+  kill_delay = "5s"
+  log = "build-errors.log"
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = true
+
+[screen]
+  clear_on_rebuild = false
+  keep_scroll = true
