@@ -9,6 +9,7 @@ import (
 	"github.com/yuhang1130/go-service-main/internal/adapters/http/middleware"
 	noticeapp "github.com/yuhang1130/go-service-main/internal/features/notice/application"
 	noticedomain "github.com/yuhang1130/go-service-main/internal/features/notice/domain"
+	"github.com/yuhang1130/go-service-main/internal/foundation/auth"
 )
 
 type Handler struct{ service *noticeapp.Service }
@@ -66,7 +67,8 @@ func (h *Handler) form(ctx *gin.Context) {
 }
 
 func (h *Handler) detail(ctx *gin.Context) {
-	h.get(ctx, false, true)
+	principal, ok := auth.PrincipalFrom(ctx.Request.Context())
+	h.get(ctx, ok && principal.Has("sys:notice:list"), true)
 }
 
 func (h *Handler) get(ctx *gin.Context, manager, detail bool) {
@@ -112,7 +114,7 @@ func (h *Handler) save(ctx *gin.Context, id int64, message string) {
 		ids[index] = int64(target)
 	}
 	actorID, _ := adminapi.AccountID(ctx)
-	command := noticeapp.Command{ID: id, Title: request.Title, Content: request.Content, Type: request.Type, Level: request.Level, Status: request.Status, TargetType: request.TargetType, TargetUserIDs: ids}
+	command := noticeapp.Command{ID: id, Title: request.Title, Content: request.Content, Type: int(request.Type), Level: request.Level, Status: request.Status, TargetType: request.TargetType, TargetUserIDs: ids}
 	if err := h.service.Save(ctx.Request.Context(), command, actorID); err != nil {
 		adminapi.Error(ctx, err)
 		return
@@ -185,7 +187,7 @@ func (h *Handler) unreadCount(ctx *gin.Context) {
 type noticeRequest struct {
 	Title         string        `json:"title"`
 	Content       string        `json:"content"`
-	Type          int           `json:"type"`
+	Type          adminapi.Int  `json:"type"`
 	Level         string        `json:"level"`
 	Status        int           `json:"status"`
 	TargetType    int           `json:"targetType"`

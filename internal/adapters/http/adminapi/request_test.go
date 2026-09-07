@@ -17,6 +17,18 @@ func TestIDAcceptsStringAndNumber(t *testing.T) {
 	}
 }
 
+func TestIntAcceptsStringAndNumber(t *testing.T) {
+	for _, input := range []string{`"42"`, `42`} {
+		var integer Int
+		if err := json.Unmarshal([]byte(input), &integer); err != nil {
+			t.Fatalf("unmarshal %s: %v", input, err)
+		}
+		if integer != 42 {
+			t.Fatalf("integer = %d, want 42", integer)
+		}
+	}
+}
+
 func TestFlagAcceptsBooleanAndNumber(t *testing.T) {
 	tests := map[string]Flag{"true": 1, "false": 0, "1": 1, "0": 0}
 	for input, want := range tests {

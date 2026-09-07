@@ -12,10 +12,17 @@ import (
 
 type Handler struct {
 	hub *Hub
-	bus *Bus
+	bus eventBus
 }
 
-func NewHandler(hub *Hub, bus *Bus) *Handler { return &Handler{hub: hub, bus: bus} }
+type eventBus interface {
+	UserConnected(context.Context, int64) error
+	UserDisconnected(context.Context, int64) error
+	Heartbeat(context.Context, int64) error
+	OnlineCount(context.Context) (int, error)
+}
+
+func NewHandler(hub *Hub, bus eventBus) *Handler { return &Handler{hub: hub, bus: bus} }
 
 func (h *Handler) RegisterProtected(router *gin.RouterGroup) {
 	sse := router.Group("/sse")
@@ -33,8 +40,9 @@ func (h *Handler) connect(ctx *gin.Context) {
 	ctx.Header("Cache-Control", "no-cache, no-transform")
 	ctx.Header("X-Accel-Buffering", "no")
 	ctx.Header("Content-Encoding", "identity")
-	_ = http.NewResponseController(ctx.Writer).SetWriteDeadline(time.Time{})
-	client, err := h.hub.Connect(userID, ctx.Writer)
+	controller := http.NewResponseController(ctx.Writer)
+	_ = controller.SetWriteDeadline(time.Time{})
+	client, err := h.hub.Connect(userID)
 	if err != nil {
 		adminapi.Error(ctx, apperror.Internal(err))
 		return
@@ -53,7 +61,9 @@ func (h *Handler) connect(ctx *gin.Context) {
 		}
 	}()
 	ctx.Status(http.StatusOK)
-	ctx.Writer.Flush()
+	if err := controller.Flush(); err != nil {
+		return
+	}
 
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
@@ -63,6 +73,17 @@ func (h *Handler) connect(ctx *gin.Context) {
 			return
 		case <-client.Done():
 			return
+		case message := <-client.messages():
+			if client.isClosed() || ctx.Request.Context().Err() != nil {
+				return
+			}
+			_ = controller.SetWriteDeadline(time.Now().Add(writeTimeout))
+			if _, err := ctx.Writer.Write(message); err != nil {
+				return
+			}
+			if err := controller.Flush(); err != nil {
+				return
+			}
 		case <-ticker.C:
 			_ = h.bus.Heartbeat(ctx.Request.Context(), userID)
 			if err := client.heartbeat(); err != nil {

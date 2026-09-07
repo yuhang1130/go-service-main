@@ -446,8 +446,10 @@ paths:
         '200': { $ref: '#/components/responses/AdminAPISuccess' }
     post:
       operationId: createNotice
+      requestBody: { $ref: '#/components/requestBodies/NoticeForm' }
       responses:
         '200': { $ref: '#/components/responses/AdminAPISuccess' }
+        '400': { $ref: '#/components/responses/AdminAPIError' }
   /api/v1/notices/my:
     get:
       operationId: listMyNotices
@@ -475,15 +477,19 @@ paths:
       - { in: path, name: noticeId, required: true, schema: { type: string } }
     get:
       operationId: getNoticeDetail
+      description: Principals with sys:notice:list may view any non-deleted notice. Other users may only view published notices addressed to them.
       responses:
         '200': { $ref: '#/components/responses/AdminAPISuccess' }
+        '404': { $ref: '#/components/responses/AdminAPIError' }
   /api/v1/notices/{noticeId}:
     parameters:
       - { in: path, name: noticeId, required: true, schema: { type: string } }
     put:
       operationId: updateNotice
+      requestBody: { $ref: '#/components/requestBodies/NoticeForm' }
       responses:
         '200': { $ref: '#/components/responses/AdminAPISuccess' }
+        '400': { $ref: '#/components/responses/AdminAPIError' }
     delete:
       operationId: deleteNotices
       responses:
@@ -641,6 +647,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/DepartmentForm' }
+    NoticeForm:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/NoticeForm' }
     IDList:
       required: true
       content:
@@ -754,6 +765,22 @@ components:
         parentId: { type: string }
         sort: { type: integer }
         status: { type: integer, enum: [0, 1] }
+    NoticeForm:
+      type: object
+      required: [title, content, type, level, targetType]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        content: { type: string, minLength: 1 }
+        type:
+          oneOf:
+            - { type: integer, minimum: 1 }
+            - { type: string, pattern: '^[1-9][0-9]*$' }
+        level: { type: string, enum: [L, M, H] }
+        status: { type: integer, enum: [0, 1], default: 0 }
+        targetType: { type: integer, enum: [1, 2] }
+        targetUserIds:
+          type: array
+          items: { type: string, pattern: '^[1-9][0-9]*$' }
     AdminAPIResult:
       type: object
       required: [code, msg, data, requestId]

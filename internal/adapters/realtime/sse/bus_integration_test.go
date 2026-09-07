@@ -5,39 +5,14 @@ package sse
 import (
 	"bytes"
 	"context"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	redisclient "github.com/redis/go-redis/v9"
 )
-
-type synchronizedWriter struct {
-	mu     sync.Mutex
-	header http.Header
-	body   bytes.Buffer
-}
-
-func newSynchronizedWriter() *synchronizedWriter {
-	return &synchronizedWriter{header: make(http.Header)}
-}
-func (w *synchronizedWriter) Header() http.Header { return w.header }
-func (w *synchronizedWriter) WriteHeader(int)     {}
-func (w *synchronizedWriter) Write(value []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.body.Write(value)
-}
-func (*synchronizedWriter) Flush() {}
-func (w *synchronizedWriter) String() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.body.String()
-}
 
 func TestRedisBusDeliversAcrossInstances(t *testing.T) {
 	address := os.Getenv("APP_REDIS_ADDRESS")
@@ -64,8 +39,7 @@ func TestRedisBusDeliversAcrossInstances(t *testing.T) {
 	}
 	defer secondBus.Close()
 
-	writer := newSynchronizedWriter()
-	connection, err := secondHub.Connect(991001, writer)
+	connection, err := secondHub.Connect(991001)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,9 +49,15 @@ func TestRedisBusDeliversAcrossInstances(t *testing.T) {
 	}
 	firstBus.PublishDictionaryChanged(ctx, "integration_dict")
 
+	var received bytes.Buffer
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if strings.Contains(writer.String(), `"dictCode":"integration_dict"`) {
+		select {
+		case message := <-connection.messages():
+			received.Write(message)
+		default:
+		}
+		if strings.Contains(received.String(), `"dictCode":"integration_dict"`) {
 			count, err := firstBus.OnlineCount(ctx)
 			if err != nil || count < 1 {
 				t.Fatalf("online count=%d err=%v", count, err)
@@ -86,5 +66,5 @@ func TestRedisBusDeliversAcrossInstances(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("cross-instance event not received: %s", writer.String())
+	t.Fatalf("cross-instance event not received: %s", received.String())
 }

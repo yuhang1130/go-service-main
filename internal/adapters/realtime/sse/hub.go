@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -31,23 +30,15 @@ const (
 )
 
 type Client struct {
-	userID  int64
-	writer  http.ResponseWriter
-	flusher http.Flusher
-	queue   chan []byte
-	done    chan struct{}
-	close   sync.Once
-	closed  atomic.Bool
+	userID int64
+	queue  chan []byte
+	done   chan struct{}
+	close  sync.Once
+	closed atomic.Bool
 }
 
-func newClient(userID int64, writer http.ResponseWriter) (*Client, error) {
-	flusher, ok := writer.(http.Flusher)
-	if !ok {
-		return nil, errors.New("response writer does not support streaming")
-	}
-	client := &Client{userID: userID, writer: writer, flusher: flusher, queue: make(chan []byte, clientQueueSize), done: make(chan struct{})}
-	go client.writeLoop()
-	return client, nil
+func newClient(userID int64) *Client {
+	return &Client{userID: userID, queue: make(chan []byte, clientQueueSize), done: make(chan struct{})}
 }
 
 func (c *Client) send(event string, payload any) error {
@@ -55,7 +46,7 @@ func (c *Client) send(event string, payload any) error {
 	if err != nil {
 		return err
 	}
-	return c.enqueue([]byte(fmt.Sprintf("event: %s\ndata: %s\n\n", event, value)))
+	return c.enqueue(fmt.Appendf(nil, "event: %s\ndata: %s\n\n", event, value))
 }
 
 func (c *Client) heartbeat() error {
@@ -76,31 +67,15 @@ func (c *Client) enqueue(message []byte) error {
 	}
 }
 
-func (c *Client) writeLoop() {
-	controller := http.NewResponseController(c.writer)
-	for {
-		select {
-		case <-c.done:
-			return
-		case message := <-c.queue:
-			_ = controller.SetWriteDeadline(time.Now().Add(writeTimeout))
-			if _, err := c.writer.Write(message); err != nil {
-				c.Close()
-				return
-			}
-			c.flusher.Flush()
-		}
-	}
-}
-
 func (c *Client) Close() {
 	c.close.Do(func() {
 		c.closed.Store(true)
 		close(c.done)
-		_ = http.NewResponseController(c.writer).SetWriteDeadline(time.Now())
 	})
 }
-func (c *Client) Done() <-chan struct{} { return c.done }
+func (c *Client) Done() <-chan struct{}   { return c.done }
+func (c *Client) messages() <-chan []byte { return c.queue }
+func (c *Client) isClosed() bool          { return c.closed.Load() }
 
 type Hub struct {
 	mu      sync.RWMutex
@@ -113,14 +88,12 @@ func NewHub(logger *slog.Logger) *Hub {
 	return &Hub{clients: make(map[int64]map[*Client]struct{}), logger: logger}
 }
 
-func (h *Hub) Connect(userID int64, writer http.ResponseWriter) (*Client, error) {
-	client, err := newClient(userID, writer)
-	if err != nil {
-		return nil, err
-	}
+func (h *Hub) Connect(userID int64) (*Client, error) {
+	client := newClient(userID)
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
+		client.Close()
 		return nil, errors.New("SSE hub is closed")
 	}
 	if h.clients[userID] == nil {

@@ -11,6 +11,8 @@ import (
 
 type ID int64
 
+type Int int
+
 type Flag int
 
 func (id *ID) UnmarshalJSON(data []byte) error {
@@ -27,6 +29,23 @@ func (id *ID) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*id = ID(value)
+	return nil
+}
+
+func (integer *Int) UnmarshalJSON(data []byte) error {
+	var text string
+	if len(data) > 0 && data[0] == '"' {
+		if err := json.Unmarshal(data, &text); err != nil {
+			return err
+		}
+	} else {
+		text = string(data)
+	}
+	value, err := strconv.Atoi(text)
+	if err != nil {
+		return err
+	}
+	*integer = Int(value)
 	return nil
 }
 
