@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/yuhang1130/go-service-main/internal/adapters/http/adminapi"
+	"github.com/yuhang1130/go-service-main/internal/foundation/apperror"
 )
 
 const requestIDKey = "request_id"
@@ -30,7 +31,7 @@ func Recovery(logger *slog.Logger) gin.HandlerFunc {
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				logger.Error("panic recovered", "request_id", RequestIDValue(ctx), "panic", recovered, "stack", string(debug.Stack()))
-				WriteError(ctx, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+				WriteError(ctx, http.StatusInternalServerError, apperror.CodeInternal, "internal server error")
 				ctx.Abort()
 			}
 		}()

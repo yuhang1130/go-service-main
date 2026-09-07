@@ -37,5 +37,5 @@ func Error(ctx *gin.Context, err error) {
 }
 
 func Invalid(ctx *gin.Context, message string) {
-	Error(ctx, apperror.InvalidArgument("A0400", message, nil))
+	Error(ctx, apperror.InvalidArgument(apperror.CodeInvalidArgument, message, nil))
 }

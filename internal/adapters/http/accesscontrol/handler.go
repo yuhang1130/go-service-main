@@ -204,7 +204,7 @@ func (h *Handler) menuOptions(ctx *gin.Context) {
 func (h *Handler) routes(ctx *gin.Context) {
 	accountID, ok := adminapi.AccountID(ctx)
 	if !ok {
-		adminapi.Error(ctx, apperror.Unauthorized("A0230", "访问令牌无效或已过期"))
+		adminapi.Error(ctx, apperror.Unauthorized(apperror.CodeInvalidAccessToken, "访问令牌无效或已过期"))
 		return
 	}
 	routes, err := h.service.Routes(ctx.Request.Context(), accountID)

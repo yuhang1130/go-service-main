@@ -75,11 +75,11 @@ func TestPublishedNoticeCannotBePublishedOrEditedAgain(t *testing.T) {
 	repository := &stateRepositoryStub{item: domain.Notice{ID: 9, Title: "通知", Content: "内容", Type: 1, Level: "L", TargetType: domain.TargetAll, PublishStatus: domain.StatusPublished, PublisherID: 1, PublishTime: &now}}
 	service := NewService(repository, sanitizerStub{}, nil)
 
-	if err := service.Publish(context.Background(), 9, 2); apperror.As(err).Code != "A0409" {
-		t.Fatalf("Publish() error = %v, want A0409", err)
+	if err := service.Publish(context.Background(), 9, 2); apperror.As(err).Code != apperror.CodeConflict {
+		t.Fatalf("Publish() error = %v, want %s", err, apperror.CodeConflict)
 	}
-	if err := service.Save(context.Background(), Command{ID: 9, Title: "修改", Content: "内容", Type: 1, Level: "L", Status: domain.StatusDraft, TargetType: domain.TargetAll}, 2); apperror.As(err).Code != "A0409" {
-		t.Fatalf("Save() error = %v, want A0409", err)
+	if err := service.Save(context.Background(), Command{ID: 9, Title: "修改", Content: "内容", Type: 1, Level: "L", Status: domain.StatusDraft, TargetType: domain.TargetAll}, 2); apperror.As(err).Code != apperror.CodeConflict {
+		t.Fatalf("Save() error = %v, want %s", err, apperror.CodeConflict)
 	}
 	if repository.publishCalls != 1 {
 		t.Fatalf("publish calls = %d, want 1 state-checked repository call", repository.publishCalls)
@@ -91,8 +91,8 @@ func TestDraftNoticeCannotBeRevoked(t *testing.T) {
 	repository := &stateRepositoryStub{item: domain.Notice{ID: 9, PublishStatus: domain.StatusDraft}}
 	service := NewService(repository, sanitizerStub{}, nil)
 
-	if err := service.Revoke(context.Background(), 9, 2); apperror.As(err).Code != "A0409" {
-		t.Fatalf("Revoke() error = %v, want A0409", err)
+	if err := service.Revoke(context.Background(), 9, 2); apperror.As(err).Code != apperror.CodeConflict {
+		t.Fatalf("Revoke() error = %v, want %s", err, apperror.CodeConflict)
 	}
 	if repository.revokeCalls != 1 {
 		t.Fatalf("revoke calls = %d, want 1 state-checked repository call", repository.revokeCalls)

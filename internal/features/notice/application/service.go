@@ -10,8 +10,6 @@ import (
 	"github.com/yuhang1130/go-service-main/internal/foundation/apperror"
 )
 
-var ErrNotFound = errors.New("not found")
-
 type Query struct {
 	Page, PageSize int
 	Title          string
@@ -121,7 +119,7 @@ func (s *Service) Get(ctx context.Context, id, userID int64, manager bool) (doma
 
 func (s *Service) Save(ctx context.Context, command Command, actorID int64) error {
 	if command.Status != domain.StatusDraft && command.Status != domain.StatusPublished {
-		return apperror.InvalidArgument("A0400", "通知只能保存为草稿或直接发布", nil)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "通知只能保存为草稿或直接发布", nil)
 	}
 	item := domain.Notice{ID: command.ID, Title: strings.TrimSpace(command.Title), Content: strings.TrimSpace(s.sanitizer.Sanitize(command.Content)), Type: command.Type, Level: strings.ToUpper(strings.TrimSpace(command.Level)), TargetType: command.TargetType, TargetUserIDs: uniquePositive(command.TargetUserIDs), PublishStatus: domain.StatusDraft}
 	if item.TargetType == domain.TargetAll {
@@ -133,7 +131,7 @@ func (s *Service) Save(ctx context.Context, command Command, actorID int64) erro
 			return mapNotFound(err)
 		}
 		if current.PublishStatus != domain.StatusDraft {
-			return apperror.Conflict("A0409", "已发布或已撤回的通知不能编辑")
+			return apperror.Conflict(apperror.CodeConflict, "已发布或已撤回的通知不能编辑")
 		}
 	}
 	if item.TargetType == domain.TargetSpecified {
@@ -142,17 +140,17 @@ func (s *Service) Save(ctx context.Context, command Command, actorID int64) erro
 			return apperror.Internal(err)
 		}
 		if !exists {
-			return apperror.InvalidArgument("A0400", "通知目标用户无效", nil)
+			return apperror.InvalidArgument(apperror.CodeInvalidArgument, "通知目标用户无效", nil)
 		}
 	}
 	now := time.Now().UTC()
 	if command.Status == domain.StatusPublished {
 		if err := item.Publish(actorID, now); err != nil {
-			return apperror.InvalidArgument("A0400", "通知发布参数无效", err)
+			return apperror.InvalidArgument(apperror.CodeInvalidArgument, "通知发布参数无效", err)
 		}
 	}
 	if err := item.Validate(); err != nil {
-		return apperror.InvalidArgument("A0400", "通知参数无效", err)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "通知参数无效", err)
 	}
 	var err error
 	if item.ID == 0 {
@@ -171,11 +169,11 @@ func (s *Service) Save(ctx context.Context, command Command, actorID int64) erro
 
 func (s *Service) Delete(ctx context.Context, ids []int64, actorID int64) error {
 	if len(ids) == 0 {
-		return apperror.InvalidArgument("A0400", "通知ID无效", nil)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "通知ID无效", nil)
 	}
 	if err := s.repository.Delete(ctx, ids, actorID); err != nil {
 		if errors.Is(err, domain.ErrInvalidTransition) {
-			return apperror.Conflict("A0409", "已发布通知请先撤回再删除")
+			return apperror.Conflict(apperror.CodeConflict, "已发布通知请先撤回再删除")
 		}
 		return mapNotFound(err)
 	}
@@ -187,7 +185,7 @@ func (s *Service) Publish(ctx context.Context, id, actorID int64) error {
 	item, err := s.repository.Publish(ctx, id, actorID, now)
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidTransition) {
-			return apperror.Conflict("A0409", "只有草稿通知可以发布")
+			return apperror.Conflict(apperror.CodeConflict, "只有草稿通知可以发布")
 		}
 		return mapMutationError(err)
 	}
@@ -200,7 +198,7 @@ func (s *Service) Revoke(ctx context.Context, id, actorID int64) error {
 	item, err := s.repository.Revoke(ctx, id, actorID, now)
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidTransition) {
-			return apperror.Conflict("A0409", "只有已发布通知可以撤回")
+			return apperror.Conflict(apperror.CodeConflict, "只有已发布通知可以撤回")
 		}
 		return mapMutationError(err)
 	}
@@ -264,14 +262,14 @@ func uniquePositive(values []int64) []int64 {
 
 func mapNotFound(err error) error {
 	if errors.Is(err, ErrNotFound) {
-		return apperror.NotFound("A0404", "通知不存在")
+		return apperror.NotFound(apperror.CodeNotFound, "通知不存在")
 	}
 	return apperror.Internal(err)
 }
 
 func mapMutationError(err error) error {
 	if errors.Is(err, domain.ErrInvalidTransition) {
-		return apperror.Conflict("A0409", "通知状态已变化，请刷新后重试")
+		return apperror.Conflict(apperror.CodeConflict, "通知状态已变化，请刷新后重试")
 	}
 	return mapNotFound(err)
 }

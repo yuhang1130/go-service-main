@@ -105,7 +105,7 @@ type fileappFile struct {
 func (h *Handler) uploadFile(ctx *gin.Context, header *multipart.FileHeader, image bool) (filedomain.File, error) {
 	file, err := header.Open()
 	if err != nil {
-		return filedomain.File{}, apperror.InvalidArgument("A0400", "上传文件无效", err)
+		return filedomain.File{}, apperror.InvalidArgument(apperror.CodeInvalidArgument, "上传文件无效", err)
 	}
 	defer file.Close()
 	if image {

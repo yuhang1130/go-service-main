@@ -13,7 +13,7 @@ func Authenticate(verifier auth.Verifier) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		header := ctx.GetHeader("Authorization")
 		if !strings.HasPrefix(header, "Bearer ") {
-			adminapi.Error(ctx, apperror.Unauthorized("A0230", "访问令牌无效或已过期"))
+			adminapi.Error(ctx, apperror.Unauthorized(apperror.CodeInvalidAccessToken, "访问令牌无效或已过期"))
 			ctx.Abort()
 			return
 		}
@@ -32,7 +32,7 @@ func RequirePermission(permission string) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		principal, ok := auth.PrincipalFrom(ctx.Request.Context())
 		if !ok || !principal.Has(permission) {
-			adminapi.Error(ctx, apperror.Forbidden("A0300", "无操作权限"))
+			adminapi.Error(ctx, apperror.Forbidden(apperror.CodePermissionDenied, "无操作权限"))
 			ctx.Abort()
 			return
 		}

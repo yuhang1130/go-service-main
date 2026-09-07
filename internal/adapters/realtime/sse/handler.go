@@ -26,7 +26,7 @@ func (h *Handler) RegisterProtected(router *gin.RouterGroup) {
 func (h *Handler) connect(ctx *gin.Context) {
 	userID, ok := adminapi.AccountID(ctx)
 	if !ok {
-		adminapi.Error(ctx, apperror.Unauthorized("A0230", "访问令牌无效或已过期"))
+		adminapi.Error(ctx, apperror.Unauthorized(apperror.CodeInvalidAccessToken, "访问令牌无效或已过期"))
 		return
 	}
 	ctx.Header("Content-Type", "text/event-stream; charset=utf-8")

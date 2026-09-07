@@ -11,11 +11,6 @@ import (
 	"github.com/yuhang1130/go-service-main/internal/foundation/persistence"
 )
 
-var (
-	ErrNotFound           = errors.New("not found")
-	ErrInvalidAssociation = errors.New("invalid role association")
-)
-
 type PageQuery struct {
 	Page     int
 	PageSize int
@@ -150,7 +145,7 @@ func (s *Service) GetRole(ctx context.Context, id int64) (domain.Role, error) {
 func (s *Service) SaveRole(ctx context.Context, command RoleCommand, actorID int64) error {
 	role := domain.Role{ID: command.ID, Name: strings.TrimSpace(command.Name), Code: strings.ToUpper(strings.TrimSpace(command.Code)), Sort: command.Sort, Status: command.Status, DataScope: command.DataScope, DepartmentIDs: command.DepartmentIDs, MenuIDs: command.MenuIDs}
 	if err := role.Validate(); err != nil {
-		return apperror.InvalidArgument("A0400", "角色名称、编码、状态或数据权限无效", err)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "角色名称、编码、状态或数据权限无效", err)
 	}
 	if role.ID != 0 {
 		current, err := s.repository.GetRole(ctx, role.ID)
@@ -158,7 +153,7 @@ func (s *Service) SaveRole(ctx context.Context, command RoleCommand, actorID int
 			return mapError(err, "角色不存在")
 		}
 		if current.Code == domain.RootRoleCode && role.Code != domain.RootRoleCode {
-			return apperror.Forbidden("A0300", "不能修改超级管理员角色编码")
+			return apperror.Forbidden(apperror.CodeForbidden, "不能修改超级管理员角色编码")
 		}
 	}
 	codeExists, err := s.repository.RoleCodeExists(ctx, role.Code, role.ID)
@@ -170,11 +165,11 @@ func (s *Service) SaveRole(ctx context.Context, command RoleCommand, actorID int
 		return apperror.Internal(err)
 	}
 	if codeExists || nameExists {
-		return apperror.Conflict("A0409", "角色名称或编码已存在")
+		return apperror.Conflict(apperror.CodeConflict, "角色名称或编码已存在")
 	}
 	if err := s.repository.SaveRole(ctx, role, actorID); err != nil {
 		if errors.Is(err, ErrInvalidAssociation) {
-			return apperror.InvalidArgument("A0400", "菜单或部门不存在、不可用", nil)
+			return apperror.InvalidArgument(apperror.CodeInvalidArgument, "菜单或部门不存在、不可用", nil)
 		}
 		return mapConflict(err, "角色名称或编码已存在")
 	}
@@ -190,14 +185,14 @@ func (s *Service) DeleteRole(ctx context.Context, id, actorID int64) error {
 		return mapError(err, "角色不存在")
 	}
 	if role.Code == domain.RootRoleCode {
-		return apperror.Forbidden("A0300", "超级管理员角色不能删除")
+		return apperror.Forbidden(apperror.CodeForbidden, "超级管理员角色不能删除")
 	}
 	used, err := s.repository.RoleInUse(ctx, id)
 	if err != nil {
 		return apperror.Internal(err)
 	}
 	if used {
-		return apperror.Conflict("A0409", "角色已分配给用户，不能删除")
+		return apperror.Conflict(apperror.CodeConflict, "角色已分配给用户，不能删除")
 	}
 	if err := s.repository.DeleteRole(ctx, id, actorID); err != nil {
 		return apperror.Internal(err)
@@ -216,7 +211,7 @@ func (s *Service) RoleMenuIDs(ctx context.Context, id int64) ([]int64, error) {
 func (s *Service) SetRoleMenus(ctx context.Context, id int64, menuIDs []int64, actorID int64) error {
 	if err := s.repository.SetRoleMenus(ctx, id, menuIDs, actorID); err != nil {
 		if errors.Is(err, ErrInvalidAssociation) {
-			return apperror.InvalidArgument("A0400", "菜单不存在", nil)
+			return apperror.InvalidArgument(apperror.CodeInvalidArgument, "菜单不存在", nil)
 		}
 		return mapError(err, "角色不存在")
 	}
@@ -235,7 +230,7 @@ func (s *Service) RoleDepartmentIDs(ctx context.Context, id int64) ([]int64, err
 func (s *Service) SetRoleDepartments(ctx context.Context, id int64, departmentIDs []int64, actorID int64) error {
 	if err := s.repository.SetRoleDepartments(ctx, id, departmentIDs, actorID); err != nil {
 		if errors.Is(err, ErrInvalidAssociation) {
-			return apperror.InvalidArgument("A0400", "部门不存在或已禁用", nil)
+			return apperror.InvalidArgument(apperror.CodeInvalidArgument, "部门不存在或已禁用", nil)
 		}
 		return mapError(err, "角色不存在")
 	}
@@ -291,10 +286,10 @@ func (s *Service) GetMenu(ctx context.Context, id int64) (domain.Menu, error) {
 func (s *Service) SaveMenu(ctx context.Context, command MenuCommand, actorID int64) error {
 	item := domain.Menu{ID: command.ID, ParentID: command.ParentID, Name: strings.TrimSpace(command.Name), Type: command.Type, RouteName: strings.TrimSpace(command.RouteName), RoutePath: strings.TrimSpace(command.RoutePath), Component: strings.TrimSpace(command.Component), ExternalURL: strings.TrimSpace(command.ExternalURL), Permission: strings.TrimSpace(command.Permission), AlwaysShow: command.AlwaysShow, KeepAlive: command.KeepAlive, Visible: command.Visible, Sort: command.Sort, Icon: command.Icon, Redirect: command.Redirect, Params: command.Params}
 	if err := item.Validate(); err != nil {
-		return apperror.InvalidArgument("A0400", "菜单名称、类型、权限或显示状态无效", err)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "菜单名称、类型、权限或显示状态无效", err)
 	}
 	if item.ID != 0 && item.ParentID == item.ID {
-		return apperror.InvalidArgument("A0400", "父级菜单不能是当前菜单", nil)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "父级菜单不能是当前菜单", nil)
 	}
 	if item.ID != 0 && item.ParentID != 0 {
 		descendant, err := s.repository.MenuIsDescendant(ctx, item.ParentID, item.ID)
@@ -302,7 +297,7 @@ func (s *Service) SaveMenu(ctx context.Context, command MenuCommand, actorID int
 			return apperror.Internal(err)
 		}
 		if descendant {
-			return apperror.InvalidArgument("A0400", "不能将菜单移动到自己的下级", nil)
+			return apperror.InvalidArgument(apperror.CodeInvalidArgument, "不能将菜单移动到自己的下级", nil)
 		}
 	}
 	nameExists, err := s.repository.MenuNameExists(ctx, item.Name, item.ParentID, item.ID)
@@ -314,7 +309,7 @@ func (s *Service) SaveMenu(ctx context.Context, command MenuCommand, actorID int
 		return apperror.Internal(err)
 	}
 	if nameExists || routeExists {
-		return apperror.Conflict("A0409", "菜单名称或路由名称已存在")
+		return apperror.Conflict(apperror.CodeConflict, "菜单名称或路由名称已存在")
 	}
 	item.TreePath = "0"
 	if item.ParentID != 0 {
@@ -346,7 +341,7 @@ func (s *Service) DeleteMenu(ctx context.Context, id, actorID int64) error {
 		return apperror.Internal(err)
 	}
 	if hasChildren {
-		return apperror.Conflict("A0409", "菜单存在子菜单，不能删除")
+		return apperror.Conflict(apperror.CodeConflict, "菜单存在子菜单，不能删除")
 	}
 	if err := s.repository.DeleteMenu(ctx, id, actorID); err != nil {
 		return mapError(err, "菜单不存在")
@@ -378,14 +373,14 @@ func normalizePage(query *PageQuery) {
 
 func mapError(err error, message string) error {
 	if errors.Is(err, ErrNotFound) {
-		return apperror.NotFound("A0404", message)
+		return apperror.NotFound(apperror.CodeNotFound, message)
 	}
 	return apperror.Internal(err)
 }
 
 func mapConflict(err error, message string) error {
 	if errors.Is(err, persistence.ErrConflict) {
-		return apperror.Conflict("A0409", message)
+		return apperror.Conflict(apperror.CodeConflict, message)
 	}
 	return apperror.Internal(err)
 }

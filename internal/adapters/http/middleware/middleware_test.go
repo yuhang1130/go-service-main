@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/yuhang1130/go-service-main/internal/adapters/http/adminapi"
+	"github.com/yuhang1130/go-service-main/internal/foundation/apperror"
 )
 
 func TestWriteErrorUsesAdminAPIEnvelope(t *testing.T) {
@@ -16,13 +17,13 @@ func TestWriteErrorUsesAdminAPIEnvelope(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Set(requestIDKey, "request-1")
 
-	WriteError(ctx, http.StatusNotFound, "ROUTE_NOT_FOUND", "route not found")
+	WriteError(ctx, http.StatusNotFound, apperror.CodeRouteNotFound, "route not found")
 
 	var result adminapi.Result
 	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if recorder.Code != http.StatusNotFound || result.Code != "ROUTE_NOT_FOUND" || result.Msg != "route not found" || result.Data != nil || result.RequestID != "request-1" {
+	if recorder.Code != http.StatusNotFound || result.Code != apperror.CodeRouteNotFound || result.Msg != "route not found" || result.Data != nil || result.RequestID != "request-1" {
 		t.Fatalf("unexpected response: status=%d result=%#v", recorder.Code, result)
 	}
 }

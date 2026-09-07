@@ -97,8 +97,8 @@ func TestLoginConsumesCaptchaBeforeCredentials(t *testing.T) {
 	service := NewService(repositoryStub{}, sessionsStub{}, captchasStub{valid: false}, passwordsStub{}, authorizerStub{}, "")
 	_, err := service.Login(context.Background(), LoginCommand{Username: "admin", Password: "password", CaptchaID: "captcha", CaptchaCode: "wrong"})
 	applicationError := apperror.As(err)
-	if applicationError.Code != "A0400" {
-		t.Fatalf("code = %q, want A0400", applicationError.Code)
+	if applicationError.Code != apperror.CodeInvalidArgument {
+		t.Fatalf("code = %q, want %s", applicationError.Code, apperror.CodeInvalidArgument)
 	}
 }
 
@@ -108,8 +108,8 @@ func TestRefreshMapsTokenReuseToUnauthorized(t *testing.T) {
 
 	_, err := service.Refresh(context.Background(), "replayed-refresh-token")
 	applicationError := apperror.As(err)
-	if applicationError.HTTPStatus != http.StatusUnauthorized || applicationError.Code != "A0231" {
-		t.Fatalf("Refresh() error = %#v, want HTTP 401/A0231", applicationError)
+	if applicationError.HTTPStatus != http.StatusUnauthorized || applicationError.Code != apperror.CodeInvalidRefreshToken {
+		t.Fatalf("Refresh() error = %#v, want HTTP 401/%s", applicationError, apperror.CodeInvalidRefreshToken)
 	}
 }
 
@@ -117,8 +117,8 @@ func TestDeleteRejectsRootAccount(t *testing.T) {
 	service := NewService(repositoryStub{root: true}, sessionsStub{}, captchasStub{}, passwordsStub{}, authorizerStub{}, "")
 	err := service.Delete(context.Background(), []int64{1}, 2)
 	applicationError := apperror.As(err)
-	if applicationError.Code != "A0300" {
-		t.Fatalf("code = %q, want A0300", applicationError.Code)
+	if applicationError.Code != apperror.CodeForbidden {
+		t.Fatalf("code = %q, want %s", applicationError.Code, apperror.CodeForbidden)
 	}
 }
 
@@ -171,8 +171,8 @@ func TestSaveMapsLateUniqueConstraintFailureToConflict(t *testing.T) {
 
 	err := service.Save(context.Background(), SaveCommand{Username: "admin", Nickname: "管理员", Gender: 0, Status: 1, RoleIDs: []int64{1}}, 1)
 	applicationError := apperror.As(err)
-	if applicationError.HTTPStatus != http.StatusConflict || applicationError.Code != "A0409" {
-		t.Fatalf("Save() error = %#v, want HTTP 409/A0409", applicationError)
+	if applicationError.HTTPStatus != http.StatusConflict || applicationError.Code != apperror.CodeConflict {
+		t.Fatalf("Save() error = %#v, want HTTP 409/%s", applicationError, apperror.CodeConflict)
 	}
 }
 
@@ -185,7 +185,7 @@ func TestSaveMapsInvalidAssociationsToBadRequest(t *testing.T) {
 
 	err := service.Save(context.Background(), SaveCommand{Username: "admin", Nickname: "管理员", Gender: 0, Status: 1, RoleIDs: []int64{999}}, 1)
 	applicationError := apperror.As(err)
-	if applicationError.HTTPStatus != http.StatusBadRequest || applicationError.Code != "A0400" {
-		t.Fatalf("Save() error = %#v, want HTTP 400/A0400", applicationError)
+	if applicationError.HTTPStatus != http.StatusBadRequest || applicationError.Code != apperror.CodeInvalidArgument {
+		t.Fatalf("Save() error = %#v, want HTTP 400/%s", applicationError, apperror.CodeInvalidArgument)
 	}
 }

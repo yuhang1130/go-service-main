@@ -91,7 +91,7 @@ func (h *Handler) login(ctx *gin.Context) {
 		if retryAfter > 0 {
 			seconds := (retryAfter + time.Second - 1) / time.Second
 			ctx.Header("Retry-After", strconv.FormatInt(int64(seconds), 10))
-			adminapi.Error(ctx, apperror.TooManyRequests("A0429", "登录请求过于频繁，请稍后重试"))
+			adminapi.Error(ctx, apperror.TooManyRequests(apperror.CodeTooManyRequests, "登录请求过于频繁，请稍后重试"))
 			return
 		}
 	}
@@ -129,7 +129,7 @@ func (h *Handler) logout(ctx *gin.Context) {
 func (h *Handler) current(ctx *gin.Context) {
 	accountID, ok := adminapi.AccountID(ctx)
 	if !ok {
-		adminapi.Error(ctx, apperror.Unauthorized("A0230", "访问令牌无效或已过期"))
+		adminapi.Error(ctx, apperror.Unauthorized(apperror.CodeInvalidAccessToken, "访问令牌无效或已过期"))
 		return
 	}
 	current, err := h.service.Current(ctx.Request.Context(), accountID)
@@ -143,7 +143,7 @@ func (h *Handler) current(ctx *gin.Context) {
 func (h *Handler) list(ctx *gin.Context) {
 	accountID, ok := adminapi.AccountID(ctx)
 	if !ok {
-		adminapi.Error(ctx, apperror.Unauthorized("A0230", "访问令牌无效或已过期"))
+		adminapi.Error(ctx, apperror.Unauthorized(apperror.CodeInvalidAccessToken, "访问令牌无效或已过期"))
 		return
 	}
 	query, valid := userListQuery(ctx)
@@ -191,7 +191,7 @@ func userListQuery(ctx *gin.Context) (identityapp.ListQuery, bool) {
 func (h *Handler) options(ctx *gin.Context) {
 	accountID, ok := adminapi.AccountID(ctx)
 	if !ok {
-		adminapi.Error(ctx, apperror.Unauthorized("A0230", "访问令牌无效或已过期"))
+		adminapi.Error(ctx, apperror.Unauthorized(apperror.CodeInvalidAccessToken, "访问令牌无效或已过期"))
 		return
 	}
 	items, err := h.service.Options(ctx.Request.Context(), accountID)

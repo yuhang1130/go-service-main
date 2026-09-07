@@ -64,10 +64,10 @@ func (s *Service) List(ctx context.Context, query Query) ([]domain.Entry, int64,
 
 func (s *Service) Trend(ctx context.Context, start, end time.Time) (Trend, error) {
 	if start.After(end) {
-		return Trend{}, apperror.InvalidArgument("A0400", "开始日期不能晚于结束日期", nil)
+		return Trend{}, apperror.InvalidArgument(apperror.CodeInvalidArgument, "开始日期不能晚于结束日期", nil)
 	}
 	if end.Sub(start) > 90*24*time.Hour {
-		return Trend{}, apperror.InvalidArgument("A0400", "查询范围不能超过90天", nil)
+		return Trend{}, apperror.InvalidArgument(apperror.CodeInvalidArgument, "查询范围不能超过90天", nil)
 	}
 	counts, err := s.repository.Daily(ctx, start, end.AddDate(0, 0, 1))
 	if err != nil {

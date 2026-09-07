@@ -40,8 +40,8 @@ func TestResponseHelpersAlwaysUseTheSameEnvelope(t *testing.T) {
 		{name: "message", write: func(ctx *gin.Context) { OKMessage(ctx, "保存成功") }, wantStatus: http.StatusOK, wantCode: CodeSuccess, wantMsg: "保存成功"},
 		{name: "page", write: func(ctx *gin.Context) { Page(ctx, []string{"one"}, 1) }, wantStatus: http.StatusOK, wantCode: CodeSuccess, wantMsg: "成功", wantData: map[string]any{"list": []any{"one"}, "total": float64(1)}},
 		{name: "error", write: func(ctx *gin.Context) {
-			Error(ctx, apperror.InvalidArgument("A0400", "参数无效", errors.New("detail")))
-		}, wantStatus: http.StatusBadRequest, wantCode: "A0400", wantMsg: "参数无效"},
+			Error(ctx, apperror.InvalidArgument(apperror.CodeInvalidArgument, "参数无效", errors.New("detail")))
+		}, wantStatus: http.StatusBadRequest, wantCode: apperror.CodeInvalidArgument, wantMsg: "参数无效"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

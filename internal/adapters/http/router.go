@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/yuhang1130/go-service-main/internal/adapters/http/middleware"
+	"github.com/yuhang1130/go-service-main/internal/foundation/apperror"
 	"github.com/yuhang1130/go-service-main/internal/foundation/auth"
 	"github.com/yuhang1130/go-service-main/internal/foundation/config"
 )
@@ -38,7 +39,7 @@ func NewRouter(cfg config.Role, logger *slog.Logger, routes RouteSet) *gin.Engin
 		middleware.BodySize(cfg.Server.MaxBodyBytes),
 	)
 	router.NoRoute(func(ctx *gin.Context) {
-		middleware.WriteError(ctx, stdhttp.StatusNotFound, "ROUTE_NOT_FOUND", "route not found")
+		middleware.WriteError(ctx, stdhttp.StatusNotFound, apperror.CodeRouteNotFound, "route not found")
 	})
 	api := router.Group("/api/v1")
 	for _, registrar := range routes.Public {

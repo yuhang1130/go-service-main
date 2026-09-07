@@ -10,8 +10,6 @@ import (
 	"github.com/yuhang1130/go-service-main/internal/foundation/persistence"
 )
 
-var ErrNotFound = errors.New("not found")
-
 type Query struct {
 	Page, PageSize int
 	Keywords       string
@@ -46,7 +44,7 @@ type Cache interface {
 func (s *Service) GetByKey(ctx context.Context, key string) (domain.Config, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return domain.Config{}, apperror.InvalidArgument("A0400", "配置键无效", nil)
+		return domain.Config{}, apperror.InvalidArgument(apperror.CodeInvalidArgument, "配置键无效", nil)
 	}
 	item, found, version, cacheErr := s.cache.Get(ctx, key)
 	if cacheErr == nil && found {
@@ -92,14 +90,14 @@ func (s *Service) Get(ctx context.Context, id int64) (domain.Config, error) {
 func (s *Service) Save(ctx context.Context, command Command, actorID int64) error {
 	item := domain.Config{ID: command.ID, Name: strings.TrimSpace(command.Name), Key: strings.TrimSpace(command.Key), Value: command.Value, Remark: strings.TrimSpace(command.Remark)}
 	if err := item.Validate(); err != nil {
-		return apperror.InvalidArgument("A0400", "配置名称或配置键无效", err)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "配置名称或配置键无效", err)
 	}
 	exists, err := s.repository.KeyExists(ctx, item.Key, item.ID)
 	if err != nil {
 		return apperror.Internal(err)
 	}
 	if exists {
-		return apperror.Conflict("A0409", "配置键已存在")
+		return apperror.Conflict(apperror.CodeConflict, "配置键已存在")
 	}
 	if item.ID == 0 {
 		err = s.repository.Create(ctx, item, actorID)
@@ -129,7 +127,7 @@ func (s *Service) Delete(ctx context.Context, id, actorID int64) error {
 
 func (s *Service) DeleteMany(ctx context.Context, ids []int64, actorID int64) error {
 	if len(ids) == 0 {
-		return apperror.InvalidArgument("A0400", "系统配置ID无效", nil)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "系统配置ID无效", nil)
 	}
 	if err := s.repository.DeleteMany(ctx, ids, actorID); err != nil {
 		return mapNotFound(err)
@@ -141,7 +139,7 @@ func (s *Service) DeleteMany(ctx context.Context, ids []int64, actorID int64) er
 func (s *Service) RefreshKey(ctx context.Context, key string) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return apperror.InvalidArgument("A0400", "配置键无效", nil)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "配置键无效", nil)
 	}
 	if err := s.cache.Invalidate(ctx, key); err != nil {
 		return apperror.Internal(err)
@@ -159,10 +157,10 @@ func (s *Service) Refresh(ctx context.Context) error {
 
 func mapNotFound(err error) error {
 	if errors.Is(err, ErrNotFound) {
-		return apperror.NotFound("A0404", "系统配置不存在")
+		return apperror.NotFound(apperror.CodeNotFound, "系统配置不存在")
 	}
 	if errors.Is(err, persistence.ErrConflict) {
-		return apperror.Conflict("A0409", "配置键已存在")
+		return apperror.Conflict(apperror.CodeConflict, "配置键已存在")
 	}
 	return apperror.Internal(err)
 }

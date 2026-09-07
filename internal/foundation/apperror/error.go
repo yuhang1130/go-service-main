@@ -22,7 +22,7 @@ func (e *Error) Error() string {
 func (e *Error) Unwrap() error { return e.Cause }
 
 func Internal(cause error) *Error {
-	return &Error{Code: "INTERNAL_ERROR", Message: "internal server error", HTTPStatus: http.StatusInternalServerError, Cause: cause}
+	return &Error{Code: CodeInternal, Message: "internal server error", HTTPStatus: http.StatusInternalServerError, Cause: cause}
 }
 
 func InvalidArgument(code, message string, cause error) *Error {

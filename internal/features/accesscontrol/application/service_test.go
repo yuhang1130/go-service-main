@@ -53,7 +53,7 @@ func TestSetRoleAssociationsMapInvalidTargetsToBadRequest(t *testing.T) {
 func assertBadRequest(t *testing.T, err error) {
 	t.Helper()
 	applicationError := apperror.As(err)
-	if applicationError.HTTPStatus != http.StatusBadRequest || applicationError.Code != "A0400" {
-		t.Fatalf("error = %#v, want HTTP 400/A0400", applicationError)
+	if applicationError.HTTPStatus != http.StatusBadRequest || applicationError.Code != apperror.CodeInvalidArgument {
+		t.Fatalf("error = %#v, want HTTP 400/%s", applicationError, apperror.CodeInvalidArgument)
 	}
 }

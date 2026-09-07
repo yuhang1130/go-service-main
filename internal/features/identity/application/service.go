@@ -13,13 +13,6 @@ import (
 	"github.com/yuhang1130/go-service-main/internal/foundation/persistence"
 )
 
-var (
-	ErrNotFound           = errors.New("not found")
-	ErrSessionNotFound    = errors.New("session not found")
-	ErrRefreshTokenReused = errors.New("refresh token reused")
-	ErrInvalidAssociation = errors.New("invalid account association")
-)
-
 type LoginCommand struct {
 	Username    string
 	Password    string
@@ -146,7 +139,7 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string) (boo
 		return false, nil
 	}
 	if strings.TrimSpace(username) == "" || len(password) < 8 {
-		return false, apperror.InvalidArgument("A0400", "bootstrap account requires a username and a password of at least 8 characters", nil)
+		return false, apperror.InvalidArgument(apperror.CodeInvalidArgument, "bootstrap account requires a username and a password of at least 8 characters", nil)
 	}
 	count, err := s.repository.Count(ctx)
 	if err != nil {
@@ -177,27 +170,27 @@ func (s *Service) Captcha(ctx context.Context) (domain.Captcha, error) {
 
 func (s *Service) Login(ctx context.Context, command LoginCommand) (domain.TokenPair, error) {
 	if strings.TrimSpace(command.Username) == "" || command.Password == "" || command.CaptchaID == "" || command.CaptchaCode == "" {
-		return domain.TokenPair{}, apperror.InvalidArgument("A0400", "用户名、密码和验证码不能为空", nil)
+		return domain.TokenPair{}, apperror.InvalidArgument(apperror.CodeInvalidArgument, "用户名、密码和验证码不能为空", nil)
 	}
 	valid, err := s.captchas.Verify(ctx, command.CaptchaID, command.CaptchaCode)
 	if err != nil {
 		return domain.TokenPair{}, apperror.Internal(err)
 	}
 	if !valid {
-		return domain.TokenPair{}, apperror.InvalidArgument("A0400", "验证码错误或已过期", nil)
+		return domain.TokenPair{}, apperror.InvalidArgument(apperror.CodeInvalidArgument, "验证码错误或已过期", nil)
 	}
 	account, err := s.repository.GetByUsername(ctx, strings.TrimSpace(command.Username))
 	if errors.Is(err, ErrNotFound) {
-		return domain.TokenPair{}, apperror.Unauthorized("A0210", "用户名或密码错误")
+		return domain.TokenPair{}, apperror.Unauthorized(apperror.CodeInvalidCredentials, "用户名或密码错误")
 	}
 	if err != nil {
 		return domain.TokenPair{}, apperror.Internal(err)
 	}
 	if !s.passwords.Compare(account.Password, command.Password) {
-		return domain.TokenPair{}, apperror.Unauthorized("A0210", "用户名或密码错误")
+		return domain.TokenPair{}, apperror.Unauthorized(apperror.CodeInvalidCredentials, "用户名或密码错误")
 	}
 	if account.Status != 1 {
-		return domain.TokenPair{}, apperror.Forbidden("A0300", "用户已被禁用")
+		return domain.TokenPair{}, apperror.Forbidden(apperror.CodeForbidden, "用户已被禁用")
 	}
 	tokens, err := s.sessions.Create(ctx, account.ID)
 	if err != nil {
@@ -208,14 +201,14 @@ func (s *Service) Login(ctx context.Context, command LoginCommand) (domain.Token
 
 func (s *Service) Refresh(ctx context.Context, refreshToken string) (domain.TokenPair, error) {
 	if strings.TrimSpace(refreshToken) == "" {
-		return domain.TokenPair{}, apperror.InvalidArgument("A0400", "刷新令牌不能为空", nil)
+		return domain.TokenPair{}, apperror.InvalidArgument(apperror.CodeInvalidArgument, "刷新令牌不能为空", nil)
 	}
 	tokens, err := s.sessions.Refresh(ctx, refreshToken)
 	if err != nil {
 		if !errors.Is(err, ErrSessionNotFound) && !errors.Is(err, ErrRefreshTokenReused) {
 			return domain.TokenPair{}, apperror.Internal(err)
 		}
-		return domain.TokenPair{}, apperror.Unauthorized("A0231", "刷新令牌无效或已过期")
+		return domain.TokenPair{}, apperror.Unauthorized(apperror.CodeInvalidRefreshToken, "刷新令牌无效或已过期")
 	}
 	return tokens, nil
 }
@@ -236,12 +229,12 @@ func (s *Service) VerifyAccount(ctx context.Context, accessToken string) (domain
 		if !errors.Is(err, ErrSessionNotFound) {
 			return domain.Account{}, accessdomain.Authorization{}, apperror.Internal(err)
 		}
-		return domain.Account{}, accessdomain.Authorization{}, apperror.Unauthorized("A0230", "访问令牌无效或已过期")
+		return domain.Account{}, accessdomain.Authorization{}, apperror.Unauthorized(apperror.CodeInvalidAccessToken, "访问令牌无效或已过期")
 	}
 	account, err := s.repository.Get(ctx, accountID)
 	if errors.Is(err, ErrNotFound) || (err == nil && account.Status != 1) {
 		_ = s.sessions.InvalidateUser(ctx, accountID)
-		return domain.Account{}, accessdomain.Authorization{}, apperror.Unauthorized("A0230", "访问令牌无效或已过期")
+		return domain.Account{}, accessdomain.Authorization{}, apperror.Unauthorized(apperror.CodeInvalidAccessToken, "访问令牌无效或已过期")
 	}
 	if err != nil {
 		return domain.Account{}, accessdomain.Authorization{}, apperror.Internal(err)
@@ -293,10 +286,10 @@ func (s *Service) Export(ctx context.Context, query ListQuery, viewerID int64) (
 func (s *Service) Import(ctx context.Context, candidates []ImportCandidate, actorID int64) (ImportResult, error) {
 	result := ImportResult{Messages: []string{}}
 	if len(candidates) == 0 || len(candidates) > 1000 {
-		return result, apperror.InvalidArgument("A0400", "导入文件没有数据或超过1000行", nil)
+		return result, apperror.InvalidArgument(apperror.CodeInvalidArgument, "导入文件没有数据或超过1000行", nil)
 	}
 	if len(s.defaultPassword) < 8 {
-		return result, apperror.InvalidArgument("A0400", "未配置新用户初始密码", nil)
+		return result, apperror.InvalidArgument(apperror.CodeInvalidArgument, "未配置新用户初始密码", nil)
 	}
 	references, err := s.repository.ImportReferences(ctx)
 	if err != nil {
@@ -383,18 +376,18 @@ func (s *Service) Get(ctx context.Context, id int64) (domain.Account, error) {
 func (s *Service) Save(ctx context.Context, command SaveCommand, actorID int64) error {
 	account := domain.Account{ID: command.ID, Username: strings.TrimSpace(command.Username), Nickname: strings.TrimSpace(command.Nickname), Mobile: strings.TrimSpace(command.Mobile), Gender: command.Gender, Avatar: strings.TrimSpace(command.Avatar), Email: strings.TrimSpace(command.Email), Status: command.Status, DepartmentID: command.DepartmentID, RoleIDs: command.RoleIDs}
 	if err := account.Validate(); err != nil || len(account.RoleIDs) == 0 {
-		return apperror.InvalidArgument("A0400", "用户名、昵称、性别、状态或角色无效", err)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "用户名、昵称、性别、状态或角色无效", err)
 	}
 	exists, err := s.repository.UsernameExists(ctx, account.Username, account.ID)
 	if err != nil {
 		return apperror.Internal(err)
 	}
 	if exists {
-		return apperror.Conflict("A0409", "用户名已存在")
+		return apperror.Conflict(apperror.CodeConflict, "用户名已存在")
 	}
 	if account.ID == 0 {
 		if len(s.defaultPassword) < 8 {
-			return apperror.InvalidArgument("A0400", "未配置新用户初始密码", nil)
+			return apperror.InvalidArgument(apperror.CodeInvalidArgument, "未配置新用户初始密码", nil)
 		}
 		account.Password, err = s.passwords.Hash(s.defaultPassword)
 		if err != nil {
@@ -411,14 +404,14 @@ func (s *Service) Save(ctx context.Context, command SaveCommand, actorID int64) 
 				return apperror.Internal(rootErr)
 			}
 			if root {
-				return apperror.Forbidden("A0300", "不能修改超级管理员用户名")
+				return apperror.Forbidden(apperror.CodeForbidden, "不能修改超级管理员用户名")
 			}
 		}
 		account.Password = current.Password
 	}
 	if err := s.repository.Save(ctx, account, account.RoleIDs, actorID); err != nil {
 		if errors.Is(err, ErrInvalidAssociation) {
-			return apperror.InvalidArgument("A0400", "部门或角色不存在、已禁用", nil)
+			return apperror.InvalidArgument(apperror.CodeInvalidArgument, "部门或角色不存在、已禁用", nil)
 		}
 		return mapConflict(err, "用户名或用户关联关系已存在")
 	}
@@ -430,18 +423,18 @@ func (s *Service) Save(ctx context.Context, command SaveCommand, actorID int64) 
 
 func (s *Service) Delete(ctx context.Context, ids []int64, actorID int64) error {
 	if len(ids) == 0 {
-		return apperror.InvalidArgument("A0400", "用户ID不能为空", nil)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "用户ID不能为空", nil)
 	}
 	for _, id := range ids {
 		if id == actorID {
-			return apperror.Forbidden("A0300", "不能删除当前登录用户")
+			return apperror.Forbidden(apperror.CodeForbidden, "不能删除当前登录用户")
 		}
 		root, err := s.repository.IsRoot(ctx, id)
 		if err != nil {
 			return apperror.Internal(err)
 		}
 		if root {
-			return apperror.Forbidden("A0300", "不能删除超级管理员")
+			return apperror.Forbidden(apperror.CodeForbidden, "不能删除超级管理员")
 		}
 	}
 	if err := s.repository.Delete(ctx, ids, actorID); err != nil {
@@ -455,17 +448,17 @@ func (s *Service) Delete(ctx context.Context, ids []int64, actorID int64) error 
 
 func (s *Service) SetStatus(ctx context.Context, id int64, status int, actorID int64) error {
 	if status != 0 && status != 1 {
-		return apperror.InvalidArgument("A0400", "状态值无效", nil)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "状态值无效", nil)
 	}
 	if id == actorID && status == 0 {
-		return apperror.Forbidden("A0300", "不能禁用当前登录用户")
+		return apperror.Forbidden(apperror.CodeForbidden, "不能禁用当前登录用户")
 	}
 	root, err := s.repository.IsRoot(ctx, id)
 	if err != nil {
 		return apperror.Internal(err)
 	}
 	if root && status == 0 {
-		return apperror.Forbidden("A0300", "不能禁用超级管理员")
+		return apperror.Forbidden(apperror.CodeForbidden, "不能禁用超级管理员")
 	}
 	if err := s.repository.SetStatus(ctx, id, status, actorID); err != nil {
 		return mapError(err, "用户不存在")
@@ -476,7 +469,7 @@ func (s *Service) SetStatus(ctx context.Context, id int64, status int, actorID i
 
 func (s *Service) ResetPassword(ctx context.Context, id int64, password string, actorID int64) error {
 	if len(password) < 8 {
-		return apperror.InvalidArgument("A0400", "密码至少需要8个字符", nil)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "密码至少需要8个字符", nil)
 	}
 	hash, err := s.passwords.Hash(password)
 	if err != nil {
@@ -495,7 +488,7 @@ func (s *Service) Profile(ctx context.Context, id int64) (domain.Account, error)
 
 func (s *Service) UpdateProfile(ctx context.Context, id int64, command ProfileCommand) error {
 	if strings.TrimSpace(command.Nickname) == "" || command.Gender < 0 || command.Gender > 2 {
-		return apperror.InvalidArgument("A0400", "昵称或性别无效", nil)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "昵称或性别无效", nil)
 	}
 	if err := s.repository.SetProfile(ctx, id, command); err != nil {
 		return mapError(err, "用户不存在")
@@ -505,14 +498,14 @@ func (s *Service) UpdateProfile(ctx context.Context, id int64, command ProfileCo
 
 func (s *Service) ChangePassword(ctx context.Context, id int64, command PasswordCommand) error {
 	if command.NewPassword != command.ConfirmPassword || len(command.NewPassword) < 8 {
-		return apperror.InvalidArgument("A0400", "两次密码不一致或密码少于8个字符", nil)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "两次密码不一致或密码少于8个字符", nil)
 	}
 	account, err := s.repository.Get(ctx, id)
 	if err != nil {
 		return mapError(err, "用户不存在")
 	}
 	if !s.passwords.Compare(account.Password, command.OldPassword) {
-		return apperror.InvalidArgument("A0400", "当前密码错误", nil)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "当前密码错误", nil)
 	}
 	return s.ResetPassword(ctx, id, command.NewPassword, id)
 }
@@ -528,14 +521,14 @@ func normalizePage(query *ListQuery) {
 
 func mapError(err error, message string) error {
 	if errors.Is(err, ErrNotFound) {
-		return apperror.NotFound("A0404", message)
+		return apperror.NotFound(apperror.CodeNotFound, message)
 	}
 	return apperror.Internal(err)
 }
 
 func mapConflict(err error, message string) error {
 	if errors.Is(err, persistence.ErrConflict) {
-		return apperror.Conflict("A0409", message)
+		return apperror.Conflict(apperror.CodeConflict, message)
 	}
 	return apperror.Internal(err)
 }

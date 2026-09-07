@@ -10,8 +10,6 @@ import (
 	"github.com/yuhang1130/go-service-main/internal/foundation/persistence"
 )
 
-var ErrNotFound = errors.New("not found")
-
 type Query struct {
 	Page, PageSize int
 	Keywords       string
@@ -103,14 +101,14 @@ func (s *Service) Get(ctx context.Context, id int64) (domain.Dictionary, error) 
 func (s *Service) Save(ctx context.Context, command DictionaryCommand, actorID int64) error {
 	item := domain.Dictionary{ID: command.ID, Code: strings.TrimSpace(command.Code), Name: strings.TrimSpace(command.Name), Status: command.Status, Remark: strings.TrimSpace(command.Remark)}
 	if err := item.Validate(); err != nil {
-		return apperror.InvalidArgument("A0400", "字典名称、编码或状态无效", err)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "字典名称、编码或状态无效", err)
 	}
 	exists, err := s.repository.CodeExists(ctx, item.Code, item.ID)
 	if err != nil {
 		return apperror.Internal(err)
 	}
 	if exists {
-		return apperror.Conflict("A0409", "字典编码已存在")
+		return apperror.Conflict(apperror.CodeConflict, "字典编码已存在")
 	}
 	originalCode := ""
 	if item.ID > 0 {
@@ -145,7 +143,7 @@ func (s *Service) Delete(ctx context.Context, id, actorID int64) error {
 		return apperror.Internal(err)
 	}
 	if count > 0 {
-		return apperror.Conflict("A0409", "请先删除该字典下的所有字典项")
+		return apperror.Conflict(apperror.CodeConflict, "请先删除该字典下的所有字典项")
 	}
 	if err := s.repository.Delete(ctx, id, actorID); err != nil {
 		return mapNotFound(err, "字典不存在")
@@ -186,21 +184,21 @@ func (s *Service) SaveItem(ctx context.Context, command ItemCommand, actorID int
 		item.TagType = "N"
 	}
 	if err := item.Validate(); err != nil {
-		return apperror.InvalidArgument("A0400", "字典项参数无效", err)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "字典项参数无效", err)
 	}
 	dictionaryExists, err := s.repository.DictionaryExists(ctx, item.DictCode)
 	if err != nil {
 		return apperror.Internal(err)
 	}
 	if !dictionaryExists {
-		return apperror.NotFound("A0404", "字典不存在")
+		return apperror.NotFound(apperror.CodeNotFound, "字典不存在")
 	}
 	exists, err := s.repository.ItemValueExists(ctx, item.DictCode, item.Value, item.ID)
 	if err != nil {
 		return apperror.Internal(err)
 	}
 	if exists {
-		return apperror.Conflict("A0409", "字典项值已存在")
+		return apperror.Conflict(apperror.CodeConflict, "字典项值已存在")
 	}
 	if item.ID == 0 {
 		err = s.repository.CreateItem(ctx, item, actorID)
@@ -216,7 +214,7 @@ func (s *Service) SaveItem(ctx context.Context, command ItemCommand, actorID int
 
 func (s *Service) DeleteItems(ctx context.Context, dictCode string, ids []int64) error {
 	if strings.TrimSpace(dictCode) == "" || len(ids) == 0 {
-		return apperror.InvalidArgument("A0400", "字典项ID无效", nil)
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "字典项ID无效", nil)
 	}
 	if err := s.repository.DeleteItems(ctx, dictCode, ids); err != nil {
 		return mapNotFound(err, "字典项不存在")
@@ -252,17 +250,17 @@ func normalizePage(page, pageSize int) (int, int) {
 
 func mapNotFound(err error, message string) error {
 	if errors.Is(err, ErrNotFound) {
-		return apperror.NotFound("A0404", message)
+		return apperror.NotFound(apperror.CodeNotFound, message)
 	}
 	return apperror.Internal(err)
 }
 
 func mapMutation(err error, notFoundMessage, conflictMessage string) error {
 	if errors.Is(err, ErrNotFound) {
-		return apperror.NotFound("A0404", notFoundMessage)
+		return apperror.NotFound(apperror.CodeNotFound, notFoundMessage)
 	}
 	if errors.Is(err, persistence.ErrConflict) {
-		return apperror.Conflict("A0409", conflictMessage)
+		return apperror.Conflict(apperror.CodeConflict, conflictMessage)
 	}
 	return apperror.Internal(err)
 }
