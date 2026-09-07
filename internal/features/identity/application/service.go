@@ -14,8 +14,10 @@ import (
 )
 
 var (
-	ErrNotFound        = errors.New("not found")
-	ErrSessionNotFound = errors.New("session not found")
+	ErrNotFound           = errors.New("not found")
+	ErrSessionNotFound    = errors.New("session not found")
+	ErrRefreshTokenReused = errors.New("refresh token reused")
+	ErrInvalidAssociation = errors.New("invalid account association")
 )
 
 type LoginCommand struct {
@@ -210,7 +212,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (domain.Toke
 	}
 	tokens, err := s.sessions.Refresh(ctx, refreshToken)
 	if err != nil {
-		if !errors.Is(err, ErrSessionNotFound) {
+		if !errors.Is(err, ErrSessionNotFound) && !errors.Is(err, ErrRefreshTokenReused) {
 			return domain.TokenPair{}, apperror.Internal(err)
 		}
 		return domain.TokenPair{}, apperror.Unauthorized("A0231", "刷新令牌无效或已过期")
@@ -415,6 +417,9 @@ func (s *Service) Save(ctx context.Context, command SaveCommand, actorID int64) 
 		account.Password = current.Password
 	}
 	if err := s.repository.Save(ctx, account, account.RoleIDs, actorID); err != nil {
+		if errors.Is(err, ErrInvalidAssociation) {
+			return apperror.InvalidArgument("A0400", "部门或角色不存在、已禁用", nil)
+		}
 		return mapConflict(err, "用户名或用户关联关系已存在")
 	}
 	if account.ID != 0 {

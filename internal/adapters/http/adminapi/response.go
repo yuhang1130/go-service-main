@@ -13,15 +13,15 @@ type Result struct {
 	Code      string `json:"code"`
 	Msg       string `json:"msg"`
 	Data      any    `json:"data"`
-	RequestID string `json:"requestId,omitempty"`
+	RequestID string `json:"requestId"`
 }
 
 func OK(ctx *gin.Context, data any) {
-	ctx.JSON(http.StatusOK, Result{Code: CodeSuccess, Msg: "成功", Data: data})
+	ctx.JSON(http.StatusOK, Result{Code: CodeSuccess, Msg: "成功", Data: data, RequestID: ctx.GetString("request_id")})
 }
 
 func OKMessage(ctx *gin.Context, message string) {
-	ctx.JSON(http.StatusOK, Result{Code: CodeSuccess, Msg: message})
+	ctx.JSON(http.StatusOK, Result{Code: CodeSuccess, Msg: message, Data: nil, RequestID: ctx.GetString("request_id")})
 }
 
 func Page(ctx *gin.Context, list any, total int64) {

@@ -98,7 +98,7 @@ func (h *Handler) importUsers(ctx *gin.Context) {
 		adminapi.Error(ctx, err)
 		return
 	}
-	adminapi.OK(ctx, gin.H{"code": adminapi.CodeSuccess, "validCount": result.ValidCount, "invalidCount": result.InvalidCount, "messageList": result.Messages})
+	adminapi.OK(ctx, gin.H{"validCount": result.ValidCount, "invalidCount": result.InvalidCount, "messageList": result.Messages})
 }
 
 func (h *Handler) writeWorkbook(ctx *gin.Context, workbook *excelize.File, filename string) {

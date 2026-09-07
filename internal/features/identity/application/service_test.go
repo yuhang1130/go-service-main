@@ -45,8 +45,9 @@ func (r repositoryStub) Save(context.Context, identitydomain.Account, []int64, i
 
 type sessionsStub struct {
 	Sessions
-	tokens    identitydomain.TokenPair
-	accountID int64
+	tokens     identitydomain.TokenPair
+	accountID  int64
+	refreshErr error
 }
 
 func (s sessionsStub) Create(context.Context, int64) (identitydomain.TokenPair, error) {
@@ -54,6 +55,10 @@ func (s sessionsStub) Create(context.Context, int64) (identitydomain.TokenPair, 
 }
 
 func (s sessionsStub) AccountID(context.Context, string) (int64, error) { return s.accountID, nil }
+
+func (s sessionsStub) Refresh(context.Context, string) (identitydomain.TokenPair, error) {
+	return s.tokens, s.refreshErr
+}
 
 type captchasStub struct {
 	Captchas
@@ -94,6 +99,17 @@ func TestLoginConsumesCaptchaBeforeCredentials(t *testing.T) {
 	applicationError := apperror.As(err)
 	if applicationError.Code != "A0400" {
 		t.Fatalf("code = %q, want A0400", applicationError.Code)
+	}
+}
+
+func TestRefreshMapsTokenReuseToUnauthorized(t *testing.T) {
+	t.Parallel()
+	service := NewService(repositoryStub{}, sessionsStub{refreshErr: ErrRefreshTokenReused}, captchasStub{}, passwordsStub{}, authorizerStub{}, "")
+
+	_, err := service.Refresh(context.Background(), "replayed-refresh-token")
+	applicationError := apperror.As(err)
+	if applicationError.HTTPStatus != http.StatusUnauthorized || applicationError.Code != "A0231" {
+		t.Fatalf("Refresh() error = %#v, want HTTP 401/A0231", applicationError)
 	}
 }
 
@@ -157,5 +173,19 @@ func TestSaveMapsLateUniqueConstraintFailureToConflict(t *testing.T) {
 	applicationError := apperror.As(err)
 	if applicationError.HTTPStatus != http.StatusConflict || applicationError.Code != "A0409" {
 		t.Fatalf("Save() error = %#v, want HTTP 409/A0409", applicationError)
+	}
+}
+
+func TestSaveMapsInvalidAssociationsToBadRequest(t *testing.T) {
+	t.Parallel()
+	service := NewService(
+		repositoryStub{writeErr: ErrInvalidAssociation},
+		sessionsStub{}, captchasStub{}, passwordsStub{}, authorizerStub{}, "password123",
+	)
+
+	err := service.Save(context.Background(), SaveCommand{Username: "admin", Nickname: "管理员", Gender: 0, Status: 1, RoleIDs: []int64{999}}, 1)
+	applicationError := apperror.As(err)
+	if applicationError.HTTPStatus != http.StatusBadRequest || applicationError.Code != "A0400" {
+		t.Fatalf("Save() error = %#v, want HTTP 400/A0400", applicationError)
 	}
 }

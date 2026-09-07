@@ -1,0 +1,59 @@
+package application
+
+import (
+	"context"
+	"net/http"
+	"testing"
+
+	"github.com/yuhang1130/go-service-main/internal/features/accesscontrol/domain"
+	"github.com/yuhang1130/go-service-main/internal/foundation/apperror"
+)
+
+type repositoryStub struct {
+	Repository
+	writeErr error
+}
+
+func (repositoryStub) RoleCodeExists(context.Context, string, int64) (bool, error) {
+	return false, nil
+}
+
+func (repositoryStub) RoleNameExists(context.Context, string, int64) (bool, error) {
+	return false, nil
+}
+
+func (r repositoryStub) SaveRole(context.Context, domain.Role, int64) error {
+	return r.writeErr
+}
+
+func (r repositoryStub) SetRoleMenus(context.Context, int64, []int64, int64) error {
+	return r.writeErr
+}
+
+func (r repositoryStub) SetRoleDepartments(context.Context, int64, []int64, int64) error {
+	return r.writeErr
+}
+
+func TestSaveRoleMapsInvalidAssociationsToBadRequest(t *testing.T) {
+	t.Parallel()
+	service := NewService(repositoryStub{writeErr: ErrInvalidAssociation}, nil)
+
+	err := service.SaveRole(context.Background(), RoleCommand{Name: "运营", Code: "OPS", Status: 1, DataScope: domain.ScopeSelf, MenuIDs: []int64{999}}, 1)
+	assertBadRequest(t, err)
+}
+
+func TestSetRoleAssociationsMapInvalidTargetsToBadRequest(t *testing.T) {
+	t.Parallel()
+	service := NewService(repositoryStub{writeErr: ErrInvalidAssociation}, nil)
+
+	assertBadRequest(t, service.SetRoleMenus(context.Background(), 2, []int64{999}, 1))
+	assertBadRequest(t, service.SetRoleDepartments(context.Background(), 2, []int64{999}, 1))
+}
+
+func assertBadRequest(t *testing.T, err error) {
+	t.Helper()
+	applicationError := apperror.As(err)
+	if applicationError.HTTPStatus != http.StatusBadRequest || applicationError.Code != "A0400" {
+		t.Fatalf("error = %#v, want HTTP 400/A0400", applicationError)
+	}
+}

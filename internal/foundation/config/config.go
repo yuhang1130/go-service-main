@@ -43,6 +43,8 @@ type Identity struct {
 	AccessTokenTTL  time.Duration `koanf:"access_token_ttl"`
 	RefreshTokenTTL time.Duration `koanf:"refresh_token_ttl"`
 	CaptchaTTL      time.Duration `koanf:"captcha_ttl"`
+	LoginRateLimit  int           `koanf:"login_rate_limit"`
+	LoginRateWindow time.Duration `koanf:"login_rate_window"`
 	BootstrapUser   string        `koanf:"bootstrap_user"`
 	BootstrapPass   string        `koanf:"bootstrap_password"`
 	DefaultPassword string        `koanf:"default_password"`
@@ -102,10 +104,13 @@ func Defaults() Role {
 			WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
 			ShutdownTimeout: 20 * time.Second, MaxHeaderBytes: 1 << 20, MaxBodyBytes: 2 << 20,
 		},
-		Logging:     logging.Config{Level: "info", Format: "text"},
-		MySQL:       MySQL{MaxOpenConns: 25, MaxIdleConns: 10, ConnMaxLifetime: 30 * time.Minute, ConnMaxIdleTime: 5 * time.Minute},
-		Redis:       Redis{Address: "127.0.0.1:6379", DialTimeout: 3 * time.Second, ReadTimeout: 2 * time.Second, WriteTimeout: 2 * time.Second},
-		Identity:    Identity{AccessTokenTTL: 2 * time.Hour, RefreshTokenTTL: 7 * 24 * time.Hour, CaptchaTTL: 5 * time.Minute},
+		Logging: logging.Config{Level: "info", Format: "text"},
+		MySQL:   MySQL{MaxOpenConns: 25, MaxIdleConns: 10, ConnMaxLifetime: 30 * time.Minute, ConnMaxIdleTime: 5 * time.Minute},
+		Redis:   Redis{Address: "127.0.0.1:6379", DialTimeout: 3 * time.Second, ReadTimeout: 2 * time.Second, WriteTimeout: 2 * time.Second},
+		Identity: Identity{
+			AccessTokenTTL: 2 * time.Hour, RefreshTokenTTL: 7 * 24 * time.Hour, CaptchaTTL: 5 * time.Minute,
+			LoginRateLimit: 10, LoginRateWindow: time.Minute,
+		},
 		FileStorage: FileStorage{Type: "local", Root: ".tmp/uploads", MaxFileBytes: 2 << 20, S3: S3Storage{Region: "us-east-1", UsePathStyle: true}},
 		RocketMQ:    RocketMQ{HandlerTimeout: 30 * time.Second},
 	}
@@ -129,7 +134,20 @@ func Load(path, role string, target *Role) error {
 	if err := loader.UnmarshalWithConf("", target, koanf.UnmarshalConf{Tag: "koanf"}); err != nil {
 		return fmt.Errorf("decode config: %w", err)
 	}
+	target.RocketMQ.Topics = normalizeList(target.RocketMQ.Topics)
 	return target.Validate(role)
+}
+
+func normalizeList(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		for item := range strings.SplitSeq(value, ",") {
+			if item = strings.TrimSpace(item); item != "" {
+				result = append(result, item)
+			}
+		}
+	}
+	return result
 }
 
 func (c Role) Validate(role string) error {
@@ -145,6 +163,9 @@ func (c Role) Validate(role string) error {
 		}
 		if c.Identity.AccessTokenTTL <= 0 || c.Identity.RefreshTokenTTL <= 0 || c.Identity.CaptchaTTL <= 0 {
 			return fmt.Errorf("identity token and captcha TTLs must be positive")
+		}
+		if c.Identity.LoginRateLimit <= 0 || c.Identity.LoginRateWindow <= 0 {
+			return fmt.Errorf("identity login rate limit and window must be positive")
 		}
 		bootstrapUserConfigured := strings.TrimSpace(c.Identity.BootstrapUser) != ""
 		bootstrapPasswordConfigured := c.Identity.BootstrapPass != ""
@@ -226,12 +247,19 @@ func mapEnvironmentKey(key string) string {
 		"MYSQL_DSN":                          "mysql.dsn",
 		"MYSQL_MAX_OPEN_CONNS":               "mysql.max_open_conns",
 		"MYSQL_MAX_IDLE_CONNS":               "mysql.max_idle_conns",
+		"MYSQL_CONN_MAX_LIFETIME":            "mysql.conn_max_lifetime",
+		"MYSQL_CONN_MAX_IDLE_TIME":           "mysql.conn_max_idle_time",
 		"REDIS_ADDRESS":                      "redis.address",
 		"REDIS_PASSWORD":                     "redis.password",
 		"REDIS_DATABASE":                     "redis.database",
+		"REDIS_DIAL_TIMEOUT":                 "redis.dial_timeout",
+		"REDIS_READ_TIMEOUT":                 "redis.read_timeout",
+		"REDIS_WRITE_TIMEOUT":                "redis.write_timeout",
 		"IDENTITY_ACCESS_TOKEN_TTL":          "identity.access_token_ttl",
 		"IDENTITY_REFRESH_TOKEN_TTL":         "identity.refresh_token_ttl",
 		"IDENTITY_CAPTCHA_TTL":               "identity.captcha_ttl",
+		"IDENTITY_LOGIN_RATE_LIMIT":          "identity.login_rate_limit",
+		"IDENTITY_LOGIN_RATE_WINDOW":         "identity.login_rate_window",
 		"IDENTITY_BOOTSTRAP_USER":            "identity.bootstrap_user",
 		"IDENTITY_BOOTSTRAP_PASSWORD":        "identity.bootstrap_password",
 		"IDENTITY_DEFAULT_PASSWORD":          "identity.default_password",
@@ -254,7 +282,11 @@ func mapEnvironmentKey(key string) string {
 		"ROCKETMQ_SECRET_KEY":                "rocketmq.secret_key",
 		"ROCKETMQ_TOPIC_PREFIX":              "rocketmq.topic_prefix",
 		"ROCKETMQ_CONSUMER_GROUP":            "rocketmq.consumer_group",
+		"ROCKETMQ_AWAIT_DURATION":            "rocketmq.await_duration",
 		"ROCKETMQ_HANDLER_TIMEOUT":           "rocketmq.handler_timeout",
+		"ROCKETMQ_TOPICS":                    "rocketmq.topics",
+		"ROCKETMQ_CONCURRENCY":               "rocketmq.concurrency",
+		"ROCKETMQ_MAX_BODY_BYTES":            "rocketmq.max_body_bytes",
 	}
 	if mapped, ok := mapping[key]; ok {
 		return mapped

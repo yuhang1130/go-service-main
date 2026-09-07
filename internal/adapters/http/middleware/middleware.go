@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/yuhang1130/go-service-main/internal/adapters/http/adminapi"
 )
 
 const requestIDKey = "request_id"
@@ -67,5 +68,10 @@ func RequestIDValue(ctx *gin.Context) string {
 }
 
 func WriteError(ctx *gin.Context, status int, code, message string) {
-	ctx.JSON(status, gin.H{"code": code, "message": message, "request_id": RequestIDValue(ctx)})
+	ctx.JSON(status, adminapi.Result{
+		Code:      code,
+		Msg:       message,
+		Data:      nil,
+		RequestID: RequestIDValue(ctx),
+	})
 }

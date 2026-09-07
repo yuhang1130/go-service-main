@@ -159,7 +159,7 @@ func BuildRoutes(items []Menu) []*Route { return buildRoutes(items, 0) }
 func buildRoutes(items []Menu, parentID int64) []*Route {
 	routes := make([]*Route, 0)
 	for _, menu := range items {
-		if menu.ParentID != parentID || menu.Type == "B" || menu.Visible == 0 {
+		if menu.ParentID != parentID || menu.Type == "B" {
 			continue
 		}
 		isExternal := menu.Type == "E"

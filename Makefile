@@ -46,7 +46,7 @@ test: ## Run fast tests with race detection
 	@$(GO) test -race ./...
 
 test-integration: ## Run tests that require real local dependencies
-	@$(GO) test -race -tags=integration ./...
+	@$(GO) test -count=1 -race -tags=integration ./...
 
 build: build-api build-consumer build-job ## Build every role
 build-api:
@@ -72,7 +72,7 @@ build-job:
 run-job: ## Run the job role
 	@$(GO) run ./cmd/job
 openapi-check: ## Validate OpenAPI syntax and contracts
-	@$(GO) test ./internal/adapters/http -run TestOpenAPIContractIsValid
+	@$(GO) test -count=1 ./internal/adapters/http -run '^TestOpenAPI'
 
 ci: check-format check-migrations vet lint test test-integration openapi-check build ## Run the complete CI gate
 dev-up: ## Start local infrastructure

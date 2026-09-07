@@ -12,6 +12,7 @@ import (
 	"github.com/yuhang1130/go-service-main/internal/features/accesscontrol/application"
 	"github.com/yuhang1130/go-service-main/internal/features/accesscontrol/domain"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repository struct{ database *gorm.DB }
@@ -178,6 +179,9 @@ func (r *Repository) roleExists(ctx context.Context, condition string, args ...a
 
 func (r *Repository) SaveRole(ctx context.Context, role domain.Role, actorID int64) error {
 	return mysqladapter.NormalizeError(r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		if err := validateRoleAssociations(transaction, role.MenuIDs, role.DepartmentIDs); err != nil {
+			return err
+		}
 		now := time.Now().UTC()
 		if role.ID == 0 {
 			row := roleRow{Name: role.Name, Code: role.Code, Sort: role.Sort, Status: role.Status, DataScope: role.DataScope, CreateBy: &actorID, UpdateBy: &actorID, CreateTime: now, UpdateTime: now}
@@ -245,15 +249,54 @@ func (r *Repository) SetRoleDepartments(ctx context.Context, id int64, ids []int
 
 func (r *Repository) replaceRoleIDs(ctx context.Context, roleID int64, table, targetColumn string, ids []int64) error {
 	return r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
-		var count int64
-		if err := transaction.Model(&roleRow{}).Where("id = ? AND is_deleted = 0", roleID).Count(&count).Error; err != nil {
+		var roleIDs []int64
+		if err := transaction.Clauses(clause.Locking{Strength: "SHARE"}).Model(&roleRow{}).
+			Where("id = ? AND is_deleted = 0", roleID).Pluck("id", &roleIDs).Error; err != nil {
 			return err
 		}
-		if count != 1 {
+		if len(roleIDs) != 1 {
 			return application.ErrNotFound
+		}
+		switch targetColumn {
+		case "menu_id":
+			if err := validateRoleAssociations(transaction, ids, nil); err != nil {
+				return err
+			}
+		case "dept_id":
+			if err := validateRoleAssociations(transaction, nil, ids); err != nil {
+				return err
+			}
+		default:
+			return errors.New("unsupported role association target")
 		}
 		return replaceIDs(transaction, table, "role_id", targetColumn, roleID, ids)
 	})
+}
+
+func validateRoleAssociations(transaction *gorm.DB, menuIDs, departmentIDs []int64) error {
+	uniqueMenuIDs := uniqueIDs(menuIDs)
+	if len(uniqueMenuIDs) > 0 {
+		var existing []int64
+		if err := transaction.Clauses(clause.Locking{Strength: "SHARE"}).Table("sys_menu").
+			Where("id IN ?", uniqueMenuIDs).Pluck("id", &existing).Error; err != nil {
+			return err
+		}
+		if len(existing) != len(uniqueMenuIDs) {
+			return application.ErrInvalidAssociation
+		}
+	}
+	uniqueDepartmentIDs := uniqueIDs(departmentIDs)
+	if len(uniqueDepartmentIDs) > 0 {
+		var existing []int64
+		if err := transaction.Clauses(clause.Locking{Strength: "SHARE"}).Table("sys_dept").
+			Where("id IN ? AND status = 1 AND is_deleted = 0", uniqueDepartmentIDs).Pluck("id", &existing).Error; err != nil {
+			return err
+		}
+		if len(existing) != len(uniqueDepartmentIDs) {
+			return application.ErrInvalidAssociation
+		}
+	}
+	return nil
 }
 
 func replaceIDs(transaction *gorm.DB, table, ownerColumn, targetColumn string, ownerID int64, ids []int64) error {
@@ -304,7 +347,7 @@ func (r *Repository) ListMenus(ctx context.Context, query application.MenuQuery)
 }
 
 func (r *Repository) MenusForAccount(ctx context.Context, accountID int64, system bool) ([]domain.Menu, error) {
-	database := r.database.WithContext(ctx).Model(&menuRow{}).Where("visible = 1")
+	database := r.database.WithContext(ctx).Model(&menuRow{})
 	if !system {
 		database = database.Where("id IN (?)", r.database.WithContext(ctx).Table("sys_role_menu AS role_menu").Select("role_menu.menu_id").Joins("JOIN sys_user_role AS user_role ON user_role.role_id = role_menu.role_id").Joins("JOIN sys_role AS role ON role.id = role_menu.role_id").Where("user_role.user_id = ? AND role.status = 1 AND role.is_deleted = 0", accountID))
 	}

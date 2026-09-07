@@ -29,6 +29,8 @@ identity:
   access_token_ttl: 2h
   refresh_token_ttl: 168h
   captcha_ttl: 5m
+  login_rate_limit: 10
+  login_rate_window: 1m
 file_storage:
   type: local
   root: .tmp/uploads

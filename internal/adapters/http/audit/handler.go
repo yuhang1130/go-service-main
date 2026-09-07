@@ -71,7 +71,7 @@ func (h *Handler) overview(ctx *gin.Context) {
 }
 
 func response(item auditdomain.Entry) gin.H {
-	return gin.H{"id": item.ID, "module": item.Module, "actionType": item.ActionType, "title": item.Title, "content": item.Content, "operatorId": item.OperatorID, "operatorName": item.OperatorName, "requestUri": item.RequestURI, "requestMethod": item.RequestMethod, "ip": item.IP, "region": item.Region, "device": item.Device, "browser": item.Browser, "os": item.OS, "status": item.Status, "executionTime": item.ExecutionTime, "errorMsg": item.ErrorMessage, "createTime": item.CreateTime.Local().Format("2006-01-02 15:04:05")}
+	return gin.H{"id": strconv.FormatInt(item.ID, 10), "module": item.Module, "actionType": item.ActionType, "title": item.Title, "content": item.Content, "operatorId": strconv.FormatInt(item.OperatorID, 10), "operatorName": item.OperatorName, "requestUri": item.RequestURI, "requestMethod": item.RequestMethod, "ip": item.IP, "region": item.Region, "device": item.Device, "browser": item.Browser, "os": item.OS, "status": item.Status, "executionTime": item.ExecutionTime, "errorMsg": item.ErrorMessage, "createTime": item.CreateTime.Local().Format("2006-01-02 15:04:05")}
 }
 
 func queryInt(ctx *gin.Context, key string, fallback int) int {

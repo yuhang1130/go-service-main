@@ -122,7 +122,7 @@ type departmentRequest struct {
 func departmentsToResponse(items []*organizationdomain.Department) []gin.H {
 	result := make([]gin.H, len(items))
 	for index, item := range items {
-		response := gin.H{"id": strconv.FormatInt(item.ID, 10), "name": item.Name, "parentId": strconv.FormatInt(item.ParentID, 10), "treePath": item.TreePath, "sort": item.Sort, "status": item.Status, "createTime": formatTime(item.CreateTime), "updateTime": formatTime(item.UpdateTime)}
+		response := gin.H{"id": strconv.FormatInt(item.ID, 10), "name": item.Name, "parentId": strconv.FormatInt(item.ParentID, 10), "treePath": item.TreePath, "sort": item.Sort, "status": item.Status, "code": item.Code, "createTime": formatTime(item.CreateTime), "updateTime": formatTime(item.UpdateTime)}
 		if len(item.Children) > 0 {
 			response["children"] = departmentsToResponse(item.Children)
 		}

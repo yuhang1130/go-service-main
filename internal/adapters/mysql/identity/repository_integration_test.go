@@ -4,6 +4,7 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -34,6 +35,15 @@ func TestRepositoryRoundTripsAccountAndRoles(t *testing.T) {
 
 	username := "identity_" + uuid.NewString()
 	repository := NewRepository(database.GORM())
+	invalidUsername := "identity_invalid_" + uuid.NewString()
+	invalidAccount := identitydomain.Account{Username: invalidUsername, Nickname: "Invalid", Gender: 0, Password: "test-only-hash", DepartmentID: 9223372036854775000, Status: 1}
+	if err := repository.Save(ctx, invalidAccount, []int64{9223372036854775000}, 0); !errors.Is(err, identityapp.ErrInvalidAssociation) {
+		t.Fatalf("invalid account associations returned %v", err)
+	}
+	if exists, err := repository.UsernameExists(ctx, invalidUsername, 0); err != nil || exists {
+		t.Fatalf("invalid account must not be persisted: exists %v, error %v", exists, err)
+	}
+
 	account := identitydomain.Account{Username: username, Nickname: "Integration", Gender: 0, Password: "test-only-hash", DepartmentID: 1, Status: 1}
 	if err := repository.Save(ctx, account, []int64{1}, 0); err != nil {
 		t.Fatal(err)

@@ -33,7 +33,7 @@ func wireIdentityAccessAPI(database *gorm.DB, redis *redisclient.Client, cfg con
 	organizations := organizationapp.NewService(organizationmysql.NewRepository(database))
 	return identityAccessAPI{
 		identity:     identities,
-		identityHTTP: identityhttp.NewHandler(identities),
+		identityHTTP: identityhttp.NewHandler(identities, sessions),
 		accessHTTP:   accesshttp.NewHandler(access),
 		organization: organizationhttp.NewHandler(organizations),
 		verifier:     localauth.NewVerifier(identities),

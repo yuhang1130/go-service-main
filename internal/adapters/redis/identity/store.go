@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -16,7 +17,10 @@ import (
 	"github.com/yuhang1130/go-service-main/internal/foundation/config"
 )
 
-var ErrSessionNotFound = identityapp.ErrSessionNotFound
+var (
+	ErrSessionNotFound    = identityapp.ErrSessionNotFound
+	ErrRefreshTokenReused = identityapp.ErrRefreshTokenReused
+)
 
 var rotateSessionScript = redisclient.NewScript(`
 local current = redis.call('GET', KEYS[1])
@@ -25,22 +29,37 @@ if not current or current ~= ARGV[1] then
 end
 
 local old_access = redis.call('HGET', KEYS[4], 'access')
-local old_refresh = redis.call('HGET', KEYS[4], 'refresh')
 if old_access then
   redis.call('DEL', ARGV[7] .. old_access)
 end
-if old_refresh then
-  redis.call('DEL', ARGV[8] .. old_refresh)
-end
 
-redis.call('DEL', KEYS[1])
+local family_ttl = redis.call('PTTL', KEYS[4])
+if family_ttl <= 0 then
+  family_ttl = tonumber(ARGV[6])
+end
+redis.call('SET', KEYS[1], ARGV[9], 'PX', family_ttl)
 redis.call('SET', KEYS[2], ARGV[1], 'PX', ARGV[5])
 redis.call('SET', KEYS[3], ARGV[1], 'PX', ARGV[6])
 redis.call('HSET', KEYS[4], 'access', ARGV[2], 'refresh', ARGV[3], 'account', ARGV[4])
 redis.call('PEXPIRE', KEYS[4], ARGV[6])
-redis.call('SADD', KEYS[5], ARGV[9])
+redis.call('SADD', KEYS[5], ARGV[8])
 redis.call('PEXPIRE', KEYS[5], ARGV[6])
 return 1
+`)
+
+var loginRateScript = redisclient.NewScript(`
+local attempts = redis.call('INCR', KEYS[1])
+if attempts == 1 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+if attempts > tonumber(ARGV[2]) then
+  local ttl = redis.call('PTTL', KEYS[1])
+  if ttl < 1 then
+    return 1
+  end
+  return ttl
+end
+return 0
 `)
 
 var revokeFamilyScript = redisclient.NewScript(`
@@ -76,19 +95,35 @@ return #families
 `)
 
 type Store struct {
-	client     *redisclient.Client
-	accessTTL  time.Duration
-	refreshTTL time.Duration
-	captchaTTL time.Duration
+	client      *redisclient.Client
+	accessTTL   time.Duration
+	refreshTTL  time.Duration
+	captchaTTL  time.Duration
+	loginLimit  int64
+	loginWindow time.Duration
 }
 
 type session struct {
 	AccountID int64  `json:"accountId"`
 	FamilyID  string `json:"familyId"`
+	Used      bool   `json:"used,omitempty"`
 }
 
 func NewStore(client *redisclient.Client, cfg config.Identity) *Store {
-	return &Store{client: client, accessTTL: cfg.AccessTokenTTL, refreshTTL: cfg.RefreshTokenTTL, captchaTTL: cfg.CaptchaTTL}
+	return &Store{
+		client: client, accessTTL: cfg.AccessTokenTTL, refreshTTL: cfg.RefreshTokenTTL, captchaTTL: cfg.CaptchaTTL,
+		loginLimit: int64(cfg.LoginRateLimit), loginWindow: cfg.LoginRateWindow,
+	}
+}
+
+func (s *Store) AllowLogin(ctx context.Context, clientID string) (time.Duration, error) {
+	retryAfterMillis, err := loginRateScript.Run(ctx, s.client, []string{loginRateKey(clientID)},
+		s.loginWindow.Milliseconds(), s.loginLimit,
+	).Int64()
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(retryAfterMillis) * time.Millisecond, nil
 }
 
 func (s *Store) Create(ctx context.Context, accountID int64) (domain.TokenPair, error) {
@@ -142,6 +177,13 @@ func (s *Store) Refresh(ctx context.Context, token string) (domain.TokenPair, er
 	if err := json.Unmarshal(value, &current); err != nil {
 		return domain.TokenPair{}, err
 	}
+	if current.Used {
+		return domain.TokenPair{}, s.rejectReusedRefresh(ctx, current)
+	}
+	tombstone, err := json.Marshal(session{AccountID: current.AccountID, FamilyID: current.FamilyID, Used: true})
+	if err != nil {
+		return domain.TokenPair{}, err
+	}
 	accessToken, err := randomToken()
 	if err != nil {
 		return domain.TokenPair{}, err
@@ -159,12 +201,24 @@ func (s *Store) Refresh(ctx context.Context, token string) (domain.TokenPair, er
 		userSessionsKey(current.AccountID),
 	}, string(value), accessToken, refreshToken, current.AccountID,
 		s.accessTTL.Milliseconds(), s.refreshTTL.Milliseconds(),
-		accessKey(""), refreshKey(""), current.FamilyID,
+		accessKey(""), current.FamilyID, string(tombstone),
 	).Int()
 	if err != nil {
 		return domain.TokenPair{}, err
 	}
 	if rotated != 1 {
+		latest, getErr := s.client.Get(ctx, oldRefreshKey).Bytes()
+		if getErr == nil {
+			var observed session
+			if unmarshalErr := json.Unmarshal(latest, &observed); unmarshalErr != nil {
+				return domain.TokenPair{}, unmarshalErr
+			}
+			if observed.Used {
+				return domain.TokenPair{}, s.rejectReusedRefresh(ctx, observed)
+			}
+		} else if !errors.Is(getErr, redisclient.Nil) {
+			return domain.TokenPair{}, getErr
+		}
 		return domain.TokenPair{}, ErrSessionNotFound
 	}
 	return domain.TokenPair{AccessToken: accessToken, RefreshToken: refreshToken, TokenType: "Bearer", ExpiresIn: int64(s.accessTTL.Seconds())}, nil
@@ -211,6 +265,13 @@ func (s *Store) revokeFamily(ctx context.Context, accountID int64, familyID stri
 		sessionFamilyKey(familyID),
 		userSessionsKey(accountID),
 	}, accessKey(""), refreshKey(""), familyID).Err()
+}
+
+func (s *Store) rejectReusedRefresh(ctx context.Context, current session) error {
+	if err := s.revokeFamily(ctx, current.AccountID, current.FamilyID); err != nil {
+		return err
+	}
+	return ErrRefreshTokenReused
 }
 
 func (s *Store) Generate(ctx context.Context) (domain.Captcha, error) {
@@ -269,3 +330,7 @@ func userSessionsKey(accountID int64) string {
 	return fmt.Sprintf("identity:user:%d:sessions", accountID)
 }
 func captchaKey(id string) string { return "identity:captcha:" + id }
+func loginRateKey(clientID string) string {
+	digest := sha256.Sum256([]byte(clientID))
+	return fmt.Sprintf("identity:login-rate:%x", digest)
+}

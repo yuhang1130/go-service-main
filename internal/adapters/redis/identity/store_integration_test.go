@@ -46,12 +46,24 @@ func TestStoreRotatesAndRevokesSessionsAndCaptchas(t *testing.T) {
 	identityConfig := config.Defaults().Identity
 	identityConfig.AccessTokenTTL = time.Minute
 	identityConfig.RefreshTokenTTL = 2 * time.Minute
+	identityConfig.LoginRateLimit = 2
+	identityConfig.LoginRateWindow = time.Minute
 	store := NewStore(client.Inner(), identityConfig)
 	accountID, err := strconv.ParseInt(strconv.FormatInt(time.Now().UnixNano(), 10)[8:], 10, 64)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.InvalidateUser(ctx, accountID) })
+	loginClientID := "integration-" + strconv.FormatInt(accountID, 10)
+	t.Cleanup(func() { _ = client.Inner().Del(ctx, loginRateKey(loginClientID)).Err() })
+	for attempt := 0; attempt < identityConfig.LoginRateLimit; attempt++ {
+		if retryAfter, err := store.AllowLogin(ctx, loginClientID); err != nil || retryAfter != 0 {
+			t.Fatalf("allowed login attempt %d returned retry %s, error %v", attempt+1, retryAfter, err)
+		}
+	}
+	if retryAfter, err := store.AllowLogin(ctx, loginClientID); err != nil || retryAfter <= 0 {
+		t.Fatalf("rate-limited login returned retry %s, error %v", retryAfter, err)
+	}
 
 	first, err := store.Create(ctx, accountID)
 	if err != nil {
@@ -67,14 +79,61 @@ func TestStoreRotatesAndRevokesSessionsAndCaptchas(t *testing.T) {
 	if _, err := store.AccountID(ctx, first.AccessToken); !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("old access token should be revoked, got %v", err)
 	}
-	if _, err := store.Refresh(ctx, first.RefreshToken); !errors.Is(err, ErrSessionNotFound) {
-		t.Fatalf("refresh token should be one-time, got %v", err)
-	}
-	if err := store.RevokeAccess(ctx, second.AccessToken); err != nil {
-		t.Fatal(err)
+	if _, err := store.Refresh(ctx, first.RefreshToken); !errors.Is(err, ErrRefreshTokenReused) {
+		t.Fatalf("refresh token reuse should be detected, got %v", err)
 	}
 	if _, err := store.AccountID(ctx, second.AccessToken); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("refresh token reuse should revoke the session family, got %v", err)
+	}
+
+	logoutPair, err := store.Create(ctx, accountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RevokeAccess(ctx, logoutPair.AccessToken); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AccountID(ctx, logoutPair.AccessToken); !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("logout should revoke access token, got %v", err)
+	}
+
+	racing, err := store.Create(ctx, accountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	racingStart := make(chan struct{})
+	racingPairs := make([]domain.TokenPair, 2)
+	racingErrors := make([]error, 2)
+	var racingWait sync.WaitGroup
+	for index := range racingErrors {
+		racingWait.Add(1)
+		go func(index int) {
+			defer racingWait.Done()
+			<-racingStart
+			racingPairs[index], racingErrors[index] = store.Refresh(ctx, racing.RefreshToken)
+		}(index)
+	}
+	close(racingStart)
+	racingWait.Wait()
+	successes := 0
+	reuses := 0
+	var racedPair domain.TokenPair
+	for index, refreshErr := range racingErrors {
+		switch {
+		case refreshErr == nil:
+			successes++
+			racedPair = racingPairs[index]
+		case errors.Is(refreshErr, ErrRefreshTokenReused):
+			reuses++
+		default:
+			t.Fatalf("concurrent refresh returned unexpected error: %v", refreshErr)
+		}
+	}
+	if successes != 1 || reuses != 1 {
+		t.Fatalf("concurrent refresh results = %d success, %d reuse; want one of each", successes, reuses)
+	}
+	if _, err := store.AccountID(ctx, racedPair.AccessToken); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("concurrent token reuse should revoke the winning session family, got %v", err)
 	}
 
 	concurrent, err := store.Create(ctx, accountID)
@@ -101,7 +160,7 @@ func TestStoreRotatesAndRevokesSessionsAndCaptchas(t *testing.T) {
 	if invalidateErr != nil {
 		t.Fatal(invalidateErr)
 	}
-	if refreshErr != nil && !errors.Is(refreshErr, ErrSessionNotFound) {
+	if refreshErr != nil && !errors.Is(refreshErr, ErrSessionNotFound) && !errors.Is(refreshErr, ErrRefreshTokenReused) {
 		t.Fatalf("concurrent refresh returned unexpected error: %v", refreshErr)
 	}
 	if refreshErr == nil {

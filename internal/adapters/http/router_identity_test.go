@@ -24,7 +24,7 @@ func (v fixedVerifier) VerifyAccessToken(context.Context, string) (auth.Principa
 }
 
 func TestIdentityAccessRoutesRegisterAndRequireAuthentication(t *testing.T) {
-	identityHandler := identityhttp.NewHandler(nil)
+	identityHandler := identityhttp.NewHandler(nil, nil)
 	router := NewRouter(config.Defaults(), slog.New(slog.NewTextHandler(io.Discard, nil)), RouteSet{
 		Verifier:  auth.UnconfiguredVerifier{},
 		Public:    []PublicRoutes{identityHandler},
@@ -32,12 +32,13 @@ func TestIdentityAccessRoutesRegisterAndRequireAuthentication(t *testing.T) {
 	})
 
 	wantRoutes := map[string]bool{
-		"GET /api/v1/auth/captcha":    false,
-		"POST /api/v1/auth/login":     false,
-		"GET /api/v1/users/me":        false,
-		"GET /api/v1/menus/routes":    false,
-		"GET /api/v1/depts/options":   false,
-		"PUT /api/v1/roles/:id/menus": false,
+		"GET /api/v1/auth/captcha":        false,
+		"POST /api/v1/auth/login":         false,
+		"POST /api/v1/auth/refresh-token": false,
+		"GET /api/v1/users/me":            false,
+		"GET /api/v1/menus/routes":        false,
+		"GET /api/v1/depts/options":       false,
+		"PUT /api/v1/roles/:id/menus":     false,
 	}
 	for _, route := range router.Routes() {
 		key := route.Method + " " + route.Path
@@ -63,7 +64,7 @@ func TestAdministrativeReadRoutesRequirePermissions(t *testing.T) {
 	router := NewRouter(config.Defaults(), slog.New(slog.NewTextHandler(io.Discard, nil)), RouteSet{
 		Verifier: fixedVerifier{principal: auth.Principal{Subject: "42", Permissions: map[string]struct{}{}}},
 		Protected: []ProtectedRoutes{
-			identityhttp.NewHandler(nil),
+			identityhttp.NewHandler(nil, nil),
 			accesshttp.NewHandler(nil),
 			organizationhttp.NewHandler(nil),
 			configurationhttp.NewHandler(nil),

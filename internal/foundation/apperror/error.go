@@ -45,6 +45,10 @@ func Conflict(code, message string) *Error {
 	return &Error{Code: code, Message: message, HTTPStatus: http.StatusConflict}
 }
 
+func TooManyRequests(code, message string) *Error {
+	return &Error{Code: code, Message: message, HTTPStatus: http.StatusTooManyRequests}
+}
+
 func As(err error) *Error {
 	var target *Error
 	if errors.As(err, &target) {

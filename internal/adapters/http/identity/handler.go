@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"time"
@@ -13,9 +14,26 @@ import (
 	"github.com/yuhang1130/go-service-main/internal/foundation/apperror"
 )
 
-type Handler struct{ service *identityapp.Service }
+type LoginLimiter interface {
+	AllowLogin(context.Context, string) (time.Duration, error)
+}
 
-func NewHandler(service *identityapp.Service) *Handler { return &Handler{service: service} }
+type Handler struct {
+	service      *identityapp.Service
+	loginLimiter LoginLimiter
+}
+
+type refreshTokenRequest struct {
+	RefreshToken string `json:"refreshToken" binding:"required"`
+}
+
+type passwordResetRequest struct {
+	Password string `json:"password" binding:"required"`
+}
+
+func NewHandler(service *identityapp.Service, loginLimiter LoginLimiter) *Handler {
+	return &Handler{service: service, loginLimiter: loginLimiter}
+}
 
 func (h *Handler) RegisterPublic(router *gin.RouterGroup) {
 	router.GET("/auth/captcha", h.captcha)
@@ -63,6 +81,20 @@ func (h *Handler) login(ctx *gin.Context) {
 		adminapi.Invalid(ctx, "登录参数无效")
 		return
 	}
+	if h.loginLimiter != nil {
+		clientID := ctx.ClientIP() + "\x00" + strings.ToLower(strings.TrimSpace(request.Username))
+		retryAfter, err := h.loginLimiter.AllowLogin(ctx.Request.Context(), clientID)
+		if err != nil {
+			adminapi.Error(ctx, apperror.Internal(err))
+			return
+		}
+		if retryAfter > 0 {
+			seconds := (retryAfter + time.Second - 1) / time.Second
+			ctx.Header("Retry-After", strconv.FormatInt(int64(seconds), 10))
+			adminapi.Error(ctx, apperror.TooManyRequests("A0429", "登录请求过于频繁，请稍后重试"))
+			return
+		}
+	}
 	tokens, err := h.service.Login(ctx.Request.Context(), identityapp.LoginCommand{Username: request.Username, Password: request.Password, CaptchaID: request.CaptchaID, CaptchaCode: request.CaptchaCode})
 	if err != nil {
 		adminapi.Error(ctx, err)
@@ -72,11 +104,12 @@ func (h *Handler) login(ctx *gin.Context) {
 }
 
 func (h *Handler) refresh(ctx *gin.Context) {
-	token := ctx.Query("refreshToken")
-	if token == "" {
-		token = ctx.PostForm("refreshToken")
+	var request refreshTokenRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		adminapi.Invalid(ctx, "刷新令牌参数无效")
+		return
 	}
-	tokens, err := h.service.Refresh(ctx.Request.Context(), token)
+	tokens, err := h.service.Refresh(ctx.Request.Context(), request.RefreshToken)
 	if err != nil {
 		adminapi.Error(ctx, err)
 		return
@@ -252,8 +285,13 @@ func (h *Handler) resetPassword(ctx *gin.Context) {
 		adminapi.Invalid(ctx, "用户ID无效")
 		return
 	}
+	var request passwordResetRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		adminapi.Invalid(ctx, "密码重置参数无效")
+		return
+	}
 	actorID, _ := adminapi.AccountID(ctx)
-	if err := h.service.ResetPassword(ctx.Request.Context(), id, ctx.Query("password"), actorID); err != nil {
+	if err := h.service.ResetPassword(ctx.Request.Context(), id, request.Password, actorID); err != nil {
 		adminapi.Error(ctx, err)
 		return
 	}
@@ -337,7 +375,11 @@ func accountToResponse(account identitydomain.Account) accountResponse {
 }
 
 func accountToForm(account identitydomain.Account) gin.H {
-	return gin.H{"id": strconv.FormatInt(account.ID, 10), "username": account.Username, "nickname": account.Nickname, "mobile": account.Mobile, "gender": account.Gender, "avatar": account.Avatar, "email": account.Email, "status": account.Status, "deptId": strconv.FormatInt(account.DepartmentID, 10), "roleIds": account.RoleIDs}
+	roleIDs := make([]string, len(account.RoleIDs))
+	for index, roleID := range account.RoleIDs {
+		roleIDs[index] = strconv.FormatInt(roleID, 10)
+	}
+	return gin.H{"id": strconv.FormatInt(account.ID, 10), "username": account.Username, "nickname": account.Nickname, "mobile": account.Mobile, "gender": account.Gender, "avatar": account.Avatar, "email": account.Email, "status": account.Status, "deptId": strconv.FormatInt(account.DepartmentID, 10), "roleIds": roleIDs}
 }
 
 func queryInt(ctx *gin.Context, key string, fallback int) int {

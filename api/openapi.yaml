@@ -25,17 +25,19 @@ paths:
         '200': { $ref: '#/components/responses/AdminAPISuccess' }
         '400': { $ref: '#/components/responses/AdminAPIError' }
         '401': { $ref: '#/components/responses/AdminAPIError' }
+        '429': { $ref: '#/components/responses/AdminAPIError' }
   /api/v1/auth/refresh-token:
     post:
       operationId: refreshToken
       security: []
-      parameters:
-        - in: query
-          name: refreshToken
-          required: true
-          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshTokenRequest' }
       responses:
         '200': { $ref: '#/components/responses/AdminAPISuccess' }
+        '400': { $ref: '#/components/responses/AdminAPIError' }
         '401': { $ref: '#/components/responses/AdminAPIError' }
   /api/v1/auth/logout:
     delete:
@@ -129,11 +131,16 @@ paths:
   /api/v1/users/{userId}/password/reset:
     parameters:
       - $ref: '#/components/parameters/UserID'
-      - { in: query, name: password, required: true, schema: { type: string, minLength: 8 } }
     put:
       operationId: resetUserPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordResetRequest' }
       responses:
         '200': { $ref: '#/components/responses/AdminAPISuccess' }
+        '400': { $ref: '#/components/responses/AdminAPIError' }
   /api/v1/users/template:
     get:
       operationId: downloadUserImportTemplate
@@ -640,7 +647,7 @@ components:
         application/json:
           schema:
             type: array
-            items: { type: integer, format: int64, minimum: 1 }
+            items: { type: string, pattern: '^[1-9][0-9]*$' }
   responses:
     AdminAPISuccess:
       description: Successful administration API response.
@@ -661,6 +668,11 @@ components:
         password: { type: string, minLength: 1 }
         captchaId: { type: string, minLength: 1 }
         captchaCode: { type: string, minLength: 1 }
+    RefreshTokenRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string, minLength: 1 }
     UserForm:
       type: object
       required: [username, nickname, status, roleIds]
@@ -676,7 +688,7 @@ components:
         deptId: { type: string }
         roleIds:
           type: array
-          items: { type: integer, format: int64 }
+          items: { type: string, pattern: '^[1-9][0-9]*$' }
     ProfileForm:
       type: object
       required: [nickname, gender]
@@ -691,6 +703,11 @@ components:
         oldPassword: { type: string }
         newPassword: { type: string, minLength: 8 }
         confirmPassword: { type: string, minLength: 8 }
+    PasswordResetRequest:
+      type: object
+      required: [password]
+      properties:
+        password: { type: string, minLength: 8 }
     RoleForm:
       type: object
       required: [name, code, status, dataScope]
@@ -739,7 +756,7 @@ components:
         status: { type: integer, enum: [0, 1] }
     AdminAPIResult:
       type: object
-      required: [code, msg, data]
+      required: [code, msg, data, requestId]
       properties:
         code: { type: string }
         msg: { type: string }

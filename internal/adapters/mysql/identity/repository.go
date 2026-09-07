@@ -12,6 +12,7 @@ import (
 	identityapp "github.com/yuhang1130/go-service-main/internal/features/identity/application"
 	identitydomain "github.com/yuhang1130/go-service-main/internal/features/identity/domain"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repository struct{ database *gorm.DB }
@@ -161,6 +162,9 @@ func (r *Repository) UsernameExists(ctx context.Context, username string, exclud
 
 func (r *Repository) Save(ctx context.Context, account identitydomain.Account, roleIDs []int64, actorID int64) error {
 	return mysqladapter.NormalizeError(r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		if err := validateAccountAssociations(transaction, account.DepartmentID, roleIDs); err != nil {
+			return err
+		}
 		now := time.Now().UTC()
 		if account.ID == 0 {
 			row := accountRow{Username: account.Username, Nickname: account.Nickname, Gender: account.Gender, Password: account.Password, DepartmentID: account.DepartmentID, Avatar: account.Avatar, Mobile: account.Mobile, Status: account.Status, Email: account.Email, CreateBy: &actorID, UpdateBy: &actorID, CreateTime: now, UpdateTime: now}
@@ -187,6 +191,29 @@ func (r *Repository) Save(ctx context.Context, account identitydomain.Account, r
 		}
 		return nil
 	}))
+}
+
+func validateAccountAssociations(transaction *gorm.DB, departmentID int64, roleIDs []int64) error {
+	if departmentID != 0 {
+		var departments []int64
+		if err := transaction.Clauses(clause.Locking{Strength: "SHARE"}).Table("sys_dept").
+			Where("id = ? AND status = 1 AND is_deleted = 0", departmentID).Pluck("id", &departments).Error; err != nil {
+			return err
+		}
+		if len(departments) != 1 {
+			return identityapp.ErrInvalidAssociation
+		}
+	}
+	uniqueRoleIDs := uniqueIDs(roleIDs)
+	var roles []int64
+	if err := transaction.Clauses(clause.Locking{Strength: "SHARE"}).Table("sys_role").
+		Where("id IN ? AND status = 1 AND is_deleted = 0", uniqueRoleIDs).Pluck("id", &roles).Error; err != nil {
+		return err
+	}
+	if len(roles) != len(uniqueRoleIDs) {
+		return identityapp.ErrInvalidAssociation
+	}
+	return nil
 }
 
 func (r *Repository) Delete(ctx context.Context, ids []int64, actorID int64) error {

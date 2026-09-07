@@ -11,7 +11,10 @@ import (
 	"github.com/yuhang1130/go-service-main/internal/foundation/persistence"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound           = errors.New("not found")
+	ErrInvalidAssociation = errors.New("invalid role association")
+)
 
 type PageQuery struct {
 	Page     int
@@ -170,6 +173,9 @@ func (s *Service) SaveRole(ctx context.Context, command RoleCommand, actorID int
 		return apperror.Conflict("A0409", "角色名称或编码已存在")
 	}
 	if err := s.repository.SaveRole(ctx, role, actorID); err != nil {
+		if errors.Is(err, ErrInvalidAssociation) {
+			return apperror.InvalidArgument("A0400", "菜单或部门不存在、不可用", nil)
+		}
 		return mapConflict(err, "角色名称或编码已存在")
 	}
 	if role.ID != 0 {
@@ -209,6 +215,9 @@ func (s *Service) RoleMenuIDs(ctx context.Context, id int64) ([]int64, error) {
 
 func (s *Service) SetRoleMenus(ctx context.Context, id int64, menuIDs []int64, actorID int64) error {
 	if err := s.repository.SetRoleMenus(ctx, id, menuIDs, actorID); err != nil {
+		if errors.Is(err, ErrInvalidAssociation) {
+			return apperror.InvalidArgument("A0400", "菜单不存在", nil)
+		}
 		return mapError(err, "角色不存在")
 	}
 	s.invalidateRoleSessions(ctx, id)
@@ -225,6 +234,9 @@ func (s *Service) RoleDepartmentIDs(ctx context.Context, id int64) ([]int64, err
 
 func (s *Service) SetRoleDepartments(ctx context.Context, id int64, departmentIDs []int64, actorID int64) error {
 	if err := s.repository.SetRoleDepartments(ctx, id, departmentIDs, actorID); err != nil {
+		if errors.Is(err, ErrInvalidAssociation) {
+			return apperror.InvalidArgument("A0400", "部门不存在或已禁用", nil)
+		}
 		return mapError(err, "角色不存在")
 	}
 	s.invalidateRoleSessions(ctx, id)

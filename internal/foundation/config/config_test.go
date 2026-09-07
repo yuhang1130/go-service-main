@@ -3,7 +3,9 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+	"time"
 )
 
 func TestLoadAppliesEnvironmentAfterYAML(t *testing.T) {
@@ -33,12 +35,39 @@ rocketmq:
 	}
 	t.Setenv("APP_SERVER_MANAGEMENT_PORT", "9191")
 	t.Setenv("APP_MYSQL_DSN", "app:app@tcp(localhost:3306)/app?parseTime=true&loc=UTC")
+	t.Setenv("APP_MYSQL_CONN_MAX_LIFETIME", "45m")
+	t.Setenv("APP_MYSQL_CONN_MAX_IDLE_TIME", "7m")
+	t.Setenv("APP_REDIS_DIAL_TIMEOUT", "4s")
+	t.Setenv("APP_REDIS_READ_TIMEOUT", "3s")
+	t.Setenv("APP_REDIS_WRITE_TIMEOUT", "5s")
+	t.Setenv("APP_IDENTITY_LOGIN_RATE_LIMIT", "15")
+	t.Setenv("APP_IDENTITY_LOGIN_RATE_WINDOW", "2m")
+	t.Setenv("APP_ROCKETMQ_AWAIT_DURATION", "6s")
+	t.Setenv("APP_ROCKETMQ_HANDLER_TIMEOUT", "35s")
+	t.Setenv("APP_ROCKETMQ_TOPICS", "events,audit")
+	t.Setenv("APP_ROCKETMQ_CONCURRENCY", "12")
+	t.Setenv("APP_ROCKETMQ_MAX_BODY_BYTES", "2097152")
 	cfg := Defaults()
 	if err := Load(path, "api", &cfg); err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Server.ManagementPort != 9191 {
 		t.Fatalf("management port = %d, want 9191", cfg.Server.ManagementPort)
+	}
+	if cfg.MySQL.ConnMaxLifetime != 45*time.Minute || cfg.MySQL.ConnMaxIdleTime != 7*time.Minute {
+		t.Fatalf("MySQL connection TTLs = %s/%s", cfg.MySQL.ConnMaxLifetime, cfg.MySQL.ConnMaxIdleTime)
+	}
+	if cfg.Redis.DialTimeout != 4*time.Second || cfg.Redis.ReadTimeout != 3*time.Second || cfg.Redis.WriteTimeout != 5*time.Second {
+		t.Fatalf("Redis timeouts = %s/%s/%s", cfg.Redis.DialTimeout, cfg.Redis.ReadTimeout, cfg.Redis.WriteTimeout)
+	}
+	if cfg.Identity.LoginRateLimit != 15 || cfg.Identity.LoginRateWindow != 2*time.Minute {
+		t.Fatalf("identity login rate = %d/%s", cfg.Identity.LoginRateLimit, cfg.Identity.LoginRateWindow)
+	}
+	if cfg.RocketMQ.AwaitDuration != 6*time.Second || cfg.RocketMQ.HandlerTimeout != 35*time.Second {
+		t.Fatalf("RocketMQ durations = %s/%s", cfg.RocketMQ.AwaitDuration, cfg.RocketMQ.HandlerTimeout)
+	}
+	if !reflect.DeepEqual(cfg.RocketMQ.Topics, []string{"events", "audit"}) || cfg.RocketMQ.Concurrency != 12 || cfg.RocketMQ.MaxBodyBytes != 2097152 {
+		t.Fatalf("RocketMQ overrides = topics %v, concurrency %d, max body %d", cfg.RocketMQ.Topics, cfg.RocketMQ.Concurrency, cfg.RocketMQ.MaxBodyBytes)
 	}
 }
 

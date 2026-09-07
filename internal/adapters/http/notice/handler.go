@@ -83,7 +83,7 @@ func (h *Handler) get(ctx *gin.Context, manager, detail bool) {
 	response := noticeResponse(item)
 	if !detail {
 		response["status"] = item.PublishStatus
-		response["targetUsers"] = item.TargetUserIDs
+		response["targetUsers"] = formatIDs(item.TargetUserIDs)
 	}
 	adminapi.OK(ctx, response)
 }
@@ -235,7 +235,15 @@ func responses(items []noticedomain.Notice) []gin.H {
 }
 
 func noticeResponse(item noticedomain.Notice) gin.H {
-	return gin.H{"id": strconv.FormatInt(item.ID, 10), "title": item.Title, "content": item.Content, "type": item.Type, "level": item.Level, "publishStatus": item.PublishStatus, "targetType": item.TargetType, "targetUserIds": item.TargetUserIDs, "publisherName": item.PublisherName, "publishTime": formatOptionalTime(item.PublishTime), "revokeTime": formatOptionalTime(item.RevokeTime), "isRead": item.IsRead, "createTime": item.CreateTime.Local().Format("2006-01-02 15:04:05")}
+	return gin.H{"id": strconv.FormatInt(item.ID, 10), "title": item.Title, "content": item.Content, "type": item.Type, "level": item.Level, "publishStatus": item.PublishStatus, "targetType": item.TargetType, "targetUserIds": formatIDs(item.TargetUserIDs), "publisherName": item.PublisherName, "publishTime": formatOptionalTime(item.PublishTime), "revokeTime": formatOptionalTime(item.RevokeTime), "isRead": item.IsRead, "createTime": item.CreateTime.Local().Format("2006-01-02 15:04:05")}
+}
+
+func formatIDs(ids []int64) []string {
+	result := make([]string, len(ids))
+	for index, id := range ids {
+		result[index] = strconv.FormatInt(id, 10)
+	}
+	return result
 }
 
 func pathID(ctx *gin.Context) (int64, bool) {
