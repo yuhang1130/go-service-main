@@ -4,6 +4,10 @@
 
 Review and manually apply the required versioned SQL files as an independent deployment step, then start the required Role binaries. A service is available only after `/readyz` on its management port returns 200.
 
+`make run-api` prints a compilation notice immediately, followed by ordered API startup-stage logs. The final `service ready` record is emitted only after both the application and management ports are bound, and includes `startup_duration_ms`. For this Make target the duration starts before `go run`, so it includes compilation and the complete service startup. Direct execution of an already-built binary measures from process startup.
+
+Text logs color the level field when stdout is an interactive terminal. JSON logs, redirected output, CI, `TERM=dumb`, and environments with `NO_COLOR` set remain free of ANSI escape sequences.
+
 For local initialization against an empty identity schema, run `make init-admin`; the interactive script starts a temporary API with one-time credentials, confirms that the ROOT account was created, and stops the process. For deployment, inject `APP_IDENTITY_BOOTSTRAP_USER` and `APP_IDENTITY_BOOTSTRAP_PASSWORD` as one-time secrets. The API creates one ROOT account only when `sys_user` has no active records. Remove the bootstrap password from the runtime environment after the account has been created. Configure `APP_IDENTITY_DEFAULT_PASSWORD` only when administrators need to create users, and rotate that shared initial password operationally.
 
 ## Shutdown
@@ -13,8 +17,10 @@ The service marks readiness false, stops accepting new work, drains in-flight wo
 ## Health
 
 - `/livez` checks only that the process is alive.
-- `/readyz` checks initialized dependencies required by the Role. Job and Consumer include their RocketMQ client lifecycle; a Job publish failure marks its producer unavailable until a later publish succeeds.
+- `/readyz` concurrently checks every initialized lifecycle dependency required by the Role under a bounded deadline. Job and Consumer include their RocketMQ client lifecycle; a Job publish failure marks its producer unavailable, and an open publisher circuit breaker keeps readiness false until a later half-open publish succeeds.
 - `/buildinfo` reports version, commit, build time, and Go version without configuration values.
+
+The readiness response names only the failed dependency (`mysql`, `redis`, `rocketmq`, or `scheduler`) and does not expose its connection error. Inspect stdout logs and dependency-specific monitoring for the root cause.
 
 ## Manual database changes
 

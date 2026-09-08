@@ -54,7 +54,9 @@ build-api:
 	@CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/go-service-main-api ./cmd/api
 
 run-api: ## Run the api role
-	@$(GO) run ./cmd/api
+	@started_at_ms="$$(perl -MTime::HiRes=time -e 'printf "%.0f", time() * 1000')"; \
+		echo "Compiling and starting API..."; \
+		GO_SERVICE_MAIN_STARTUP_STARTED_AT_MS="$$started_at_ms" $(GO) run ./cmd/api
 
 dev-api: ## Run the api role with local hot reload
 	@$(GO) run github.com/air-verse/air@$(AIR_VERSION) -c .air.api.toml

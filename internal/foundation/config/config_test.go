@@ -40,6 +40,13 @@ rocketmq:
 	t.Setenv("APP_REDIS_DIAL_TIMEOUT", "4s")
 	t.Setenv("APP_REDIS_READ_TIMEOUT", "3s")
 	t.Setenv("APP_REDIS_WRITE_TIMEOUT", "5s")
+	t.Setenv("APP_RESILIENCE_HTTP_RATE_LIMIT_ENABLED", "true")
+	t.Setenv("APP_RESILIENCE_HTTP_RATE_LIMIT_RPS", "25")
+	t.Setenv("APP_RESILIENCE_HTTP_RATE_LIMIT_BURST", "50")
+	t.Setenv("APP_RESILIENCE_HTTP_RATE_LIMIT_CLIENT_TTL", "15m")
+	t.Setenv("APP_RESILIENCE_CIRCUIT_BREAKER_FAILURE_THRESHOLD", "7")
+	t.Setenv("APP_RESILIENCE_CIRCUIT_BREAKER_OPEN_TIMEOUT", "45s")
+	t.Setenv("APP_RESILIENCE_CIRCUIT_BREAKER_HALF_OPEN_MAX", "2")
 	t.Setenv("APP_IDENTITY_LOGIN_RATE_LIMIT", "15")
 	t.Setenv("APP_IDENTITY_LOGIN_RATE_WINDOW", "2m")
 	t.Setenv("APP_ROCKETMQ_AWAIT_DURATION", "6s")
@@ -59,6 +66,12 @@ rocketmq:
 	}
 	if cfg.Redis.DialTimeout != 4*time.Second || cfg.Redis.ReadTimeout != 3*time.Second || cfg.Redis.WriteTimeout != 5*time.Second {
 		t.Fatalf("Redis timeouts = %s/%s/%s", cfg.Redis.DialTimeout, cfg.Redis.ReadTimeout, cfg.Redis.WriteTimeout)
+	}
+	if cfg.Resilience.HTTPRateLimit.RequestsPerSecond != 25 || cfg.Resilience.HTTPRateLimit.Burst != 50 || cfg.Resilience.HTTPRateLimit.ClientTTL != 15*time.Minute {
+		t.Fatalf("HTTP rate limit config = %#v", cfg.Resilience.HTTPRateLimit)
+	}
+	if cfg.Resilience.CircuitBreaker.FailureThreshold != 7 || cfg.Resilience.CircuitBreaker.OpenTimeout != 45*time.Second || cfg.Resilience.CircuitBreaker.HalfOpenMaxRequests != 2 {
+		t.Fatalf("circuit breaker config = %#v", cfg.Resilience.CircuitBreaker)
 	}
 	if cfg.Identity.LoginRateLimit != 15 || cfg.Identity.LoginRateWindow != 2*time.Minute {
 		t.Fatalf("identity login rate = %d/%s", cfg.Identity.LoginRateLimit, cfg.Identity.LoginRateWindow)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -48,6 +49,12 @@ func (r *Registry) Register(name string, check Check) {
 	r.checks[name] = check
 }
 
+func (r *Registry) RegisterAll(checks map[string]func(context.Context) error) {
+	for name, check := range checks {
+		r.Register(name, check)
+	}
+}
+
 func (r *Registry) SetReady(ready bool) { r.ready.Store(ready) }
 
 func (r *Registry) Handler() http.Handler {
@@ -69,15 +76,61 @@ func (r *Registry) readyHandler(w http.ResponseWriter, request *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), 750*time.Millisecond)
 	defer cancel()
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	for name, check := range r.checks {
-		if err := check(ctx); err != nil {
+	checks, names := r.snapshot()
+	type result struct {
+		name string
+		err  error
+	}
+	results := make(chan result, len(names))
+	for _, name := range names {
+		name := name
+		go func() {
+			results <- result{name: name, err: checks[name](ctx)}
+		}()
+	}
+	failures := make(map[string]struct{})
+	completed := make(map[string]struct{})
+	for range names {
+		select {
+		case result := <-results:
+			completed[result.name] = struct{}{}
+			if result.err != nil {
+				failures[result.name] = struct{}{}
+			}
+		case <-ctx.Done():
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "dependency": firstPending(names, completed)})
+			return
+		}
+	}
+	for _, name := range names {
+		if _, failed := failures[name]; failed {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "dependency": name})
 			return
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+}
+
+func (r *Registry) snapshot() (map[string]Check, []string) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	checks := make(map[string]Check, len(r.checks))
+	names := make([]string, 0, len(r.checks))
+	for name, check := range r.checks {
+		checks[name] = check
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return checks, names
+}
+
+func firstPending(names []string, completed map[string]struct{}) string {
+	for _, name := range names {
+		if _, done := completed[name]; !done {
+			return name
+		}
+	}
+	return "unknown"
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

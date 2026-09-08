@@ -14,6 +14,7 @@ import (
 	"github.com/apache/rocketmq-clients/golang/v5/credentials"
 	"github.com/yuhang1130/go-service-main/internal/foundation/config"
 	"github.com/yuhang1130/go-service-main/internal/foundation/eventing"
+	"github.com/yuhang1130/go-service-main/internal/foundation/resilience/circuitbreaker"
 )
 
 type Producer struct {
@@ -21,12 +22,21 @@ type Producer struct {
 	prefix   string
 	maxBytes int
 	logger   *slog.Logger
+	breaker  *circuitbreaker.Breaker
 	ready    atomic.Bool
 }
 
-func NewProducer(cfg config.RocketMQ, logger *slog.Logger) (*Producer, error) {
+func NewProducer(cfg config.RocketMQ, breakerConfig config.CircuitBreaker, logger *slog.Logger) (*Producer, error) {
 	forceConsoleLogging()
 	if err := validateCommon(cfg); err != nil {
+		return nil, err
+	}
+	breaker, err := circuitbreaker.New(circuitbreaker.Config{
+		FailureThreshold:    breakerConfig.FailureThreshold,
+		OpenTimeout:         breakerConfig.OpenTimeout,
+		HalfOpenMaxRequests: breakerConfig.HalfOpenMaxRequests,
+	})
+	if err != nil {
 		return nil, err
 	}
 	topics := make([]string, 0, len(cfg.Topics))
@@ -37,7 +47,7 @@ func NewProducer(cfg config.RocketMQ, logger *slog.Logger) (*Producer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Producer{inner: inner, prefix: cfg.TopicPrefix, maxBytes: cfg.MaxBodyBytes, logger: logger}, nil
+	return &Producer{inner: inner, prefix: cfg.TopicPrefix, maxBytes: cfg.MaxBodyBytes, logger: logger, breaker: breaker}, nil
 }
 
 func (p *Producer) Start() error {
@@ -53,11 +63,11 @@ func (p *Producer) Close() error {
 	return p.inner.GracefulStop()
 }
 
-func (p *Producer) Ready(context.Context) error {
+func (p *Producer) Ready(ctx context.Context) error {
 	if !p.ready.Load() {
 		return fmt.Errorf("rocketmq producer is not ready")
 	}
-	return nil
+	return p.breaker.Ready(ctx)
 }
 
 func (p *Producer) Publish(ctx context.Context, logicalTopic string, event eventing.Envelope) error {
@@ -75,7 +85,10 @@ func (p *Producer) Publish(ctx context.Context, logicalTopic string, event event
 	}
 	message.AddProperty("event_type", event.EventType)
 	message.AddProperty("event_version", fmt.Sprint(event.EventVersion))
-	_, err = p.inner.Send(ctx, message)
+	err = p.breaker.Execute(ctx, func(sendCtx context.Context) error {
+		_, sendErr := p.inner.Send(sendCtx, message)
+		return sendErr
+	})
 	if err == nil {
 		p.ready.Store(true)
 		p.logger.Info("event published", "event_id", event.EventID, "event_type", event.EventType, "topic", logicalTopic)

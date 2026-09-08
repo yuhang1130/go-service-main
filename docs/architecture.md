@@ -17,6 +17,30 @@ cmd -> bootstrap -> adapters -> application -> domain
 
 Domain and application packages must not import transport or infrastructure SDKs. Repository interfaces are shaped by their consuming use cases rather than by database tables.
 
+## Process lifecycle
+
+Each Role explicitly constructs a `lifecycle.Manager` from named services. A service declares only its name, dependencies, startup, shutdown, and readiness functions. The manager validates missing dependencies and cycles before startup, starts independent services concurrently by dependency layer, and stops successfully started services in reverse layer order.
+
+There is no global service registry or runtime package scanning. The current Role graphs are:
+
+```text
+API:      mysql     redis
+
+Job:      mysql ------\
+          rocketmq -----> scheduler
+
+Consumer: mysql -> rocketmq
+```
+
+If one layer fails, services already started in that layer and all preceding layers are rolled back. On process cancellation, readiness is cleared before HTTP draining completes; external clients are closed only after the management/application servers have stopped accepting work.
+
+Every lifecycle service contributes a readiness check. `/readyz` snapshots and runs those checks concurrently under one bounded deadline, without holding the registry lock or exposing dependency errors in the response.
+
+## Resilience
+
+- The API installs a per-client in-memory token-bucket limiter in the HTTP adapter. It returns HTTP 429, stable code `TOO_MANY_REQUESTS`, and `Retry-After`; the existing Redis-backed username/IP login limiter remains a separate identity control.
+- The Job RocketMQ producer wraps Outbox publication with a closed/open/half-open circuit breaker. An open producer makes Job readiness fail, while the durable Outbox retry path retains the event for a later attempt.
+
 ## Role boundaries
 
 - API accepts synchronous requests and maps protocol DTOs to application commands and queries.

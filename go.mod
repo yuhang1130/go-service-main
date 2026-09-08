@@ -27,6 +27,7 @@ require (
 	github.com/redis/go-redis/v9 v9.21.0
 	github.com/xuri/excelize/v2 v2.11.0
 	golang.org/x/crypto v0.55.0
+	golang.org/x/time v0.15.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.2
 )
@@ -117,7 +118,6 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260811182544-a038080d80e5 // indirect
 	golang.org/x/text v0.41.0 // indirect
-	golang.org/x/time v0.11.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
 	golang.org/x/vuln v1.7.0 // indirect
 	google.golang.org/api v0.230.0 // indirect

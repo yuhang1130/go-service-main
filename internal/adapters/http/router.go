@@ -11,6 +11,12 @@ import (
 	"github.com/yuhang1130/go-service-main/internal/foundation/config"
 )
 
+func init() {
+	// Route registration is summarized through slog during bootstrap. Suppress
+	// Gin's per-route debug lines so startup progress remains readable.
+	gin.DebugPrintRouteFunc = func(string, string, string, int) {}
+}
+
 type PublicRoutes interface {
 	RegisterPublic(*gin.RouterGroup)
 }
@@ -32,12 +38,16 @@ func NewRouter(cfg config.Role, logger *slog.Logger, routes RouteSet) *gin.Engin
 	}
 	router := gin.New()
 	_ = router.SetTrustedProxies(nil)
-	router.Use(
+	handlers := []gin.HandlerFunc{
 		middleware.RequestID(),
 		middleware.Recovery(logger),
 		middleware.AccessLog(logger),
 		middleware.BodySize(cfg.Server.MaxBodyBytes),
-	)
+	}
+	if cfg.Resilience.HTTPRateLimit.Enabled {
+		handlers = append(handlers, middleware.RateLimit(middleware.NewClientRateLimiter(cfg.Resilience.HTTPRateLimit)))
+	}
+	router.Use(handlers...)
 	router.NoRoute(func(ctx *gin.Context) {
 		middleware.WriteError(ctx, stdhttp.StatusNotFound, apperror.CodeRouteNotFound, "route not found")
 	})

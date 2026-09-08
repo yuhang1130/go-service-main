@@ -16,7 +16,7 @@
 │   ├── bootstrap/              # 各 Role 的依赖装配和生命周期
 │   ├── features/               # 业务领域规则和应用用例
 │   ├── adapters/               # HTTP、MySQL、Redis、MQ、调度器适配器
-│   └── foundation/             # 配置、日志、健康检查、事务等共享基础设施
+│   └── foundation/             # 配置、生命周期、韧性、健康检查、事务等共享基础设施
 ├── configs/                    # 各 Role 独立配置
 ├── migrations/                 # 人工执行的版本化 SQL，唯一数据库结构来源
 ├── api/openapi.yaml            # API 契约
@@ -32,6 +32,8 @@ cmd -> bootstrap -> adapters -> application -> domain
 ```
 
 `domain` 和 `application` 不依赖 Gin、GORM、Redis、RocketMQ 等基础设施 SDK。不同 Role 可以复用同一个 Feature，但不会因此共享进程生命周期。
+
+各 Role 在 `internal/bootstrap` 中显式声明服务依赖图。无依赖的节点并行启动，启动失败会回滚已启动节点，关闭时按依赖层级逆序执行；生命周期节点的探活自动接入 `/readyz`。API 另有按直连客户端 IP 的令牌桶限流，Job 的 Outbox RocketMQ 发布带熔断保护。详细边界见 [架构说明](docs/architecture.md)。
 
 ## 环境要求
 

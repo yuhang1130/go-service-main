@@ -11,6 +11,16 @@ server:
 logging:
   level: info
   format: text
+resilience:
+  http_rate_limit:
+    enabled: false
+    requests_per_second: 100
+    burst: 200
+    client_ttl: 10m
+  circuit_breaker:
+    failure_threshold: 5
+    open_timeout: 30s
+    half_open_max_requests: 1
 mysql:
   dsn: root:mysql_12345@tcp(127.0.0.1:13306)/go_main?charset=utf8mb4&parseTime=true&loc=UTC
   max_open_conns: 15

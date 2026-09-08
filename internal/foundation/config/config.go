@@ -84,6 +84,24 @@ type RocketMQ struct {
 	MaxBodyBytes   int           `koanf:"max_body_bytes"`
 }
 
+type HTTPRateLimit struct {
+	Enabled           bool          `koanf:"enabled"`
+	RequestsPerSecond float64       `koanf:"requests_per_second"`
+	Burst             int           `koanf:"burst"`
+	ClientTTL         time.Duration `koanf:"client_ttl"`
+}
+
+type CircuitBreaker struct {
+	FailureThreshold    uint32        `koanf:"failure_threshold"`
+	OpenTimeout         time.Duration `koanf:"open_timeout"`
+	HalfOpenMaxRequests uint32        `koanf:"half_open_max_requests"`
+}
+
+type Resilience struct {
+	HTTPRateLimit  HTTPRateLimit  `koanf:"http_rate_limit"`
+	CircuitBreaker CircuitBreaker `koanf:"circuit_breaker"`
+}
+
 type Role struct {
 	Environment string         `koanf:"environment"`
 	Server      Server         `koanf:"server"`
@@ -93,6 +111,7 @@ type Role struct {
 	Identity    Identity       `koanf:"identity"`
 	FileStorage FileStorage    `koanf:"file_storage"`
 	RocketMQ    RocketMQ       `koanf:"rocketmq"`
+	Resilience  Resilience     `koanf:"resilience"`
 }
 
 func Defaults() Role {
@@ -113,6 +132,12 @@ func Defaults() Role {
 		},
 		FileStorage: FileStorage{Type: "local", Root: ".tmp/uploads", MaxFileBytes: 2 << 20, S3: S3Storage{Region: "us-east-1", UsePathStyle: true}},
 		RocketMQ:    RocketMQ{HandlerTimeout: 30 * time.Second},
+		Resilience: Resilience{
+			HTTPRateLimit: HTTPRateLimit{RequestsPerSecond: 100, Burst: 200, ClientTTL: 10 * time.Minute},
+			CircuitBreaker: CircuitBreaker{
+				FailureThreshold: 5, OpenTimeout: 30 * time.Second, HalfOpenMaxRequests: 1,
+			},
+		},
 	}
 }
 
@@ -207,6 +232,15 @@ func (c Role) Validate(role string) error {
 	if c.Server.ShutdownTimeout <= 0 {
 		return fmt.Errorf("server.shutdown_timeout must be positive")
 	}
+	if c.Resilience.HTTPRateLimit.Enabled &&
+		(c.Resilience.HTTPRateLimit.RequestsPerSecond <= 0 || c.Resilience.HTTPRateLimit.Burst <= 0 || c.Resilience.HTTPRateLimit.ClientTTL <= 0) {
+		return fmt.Errorf("resilience.http_rate_limit settings must be positive when enabled")
+	}
+	if c.Resilience.CircuitBreaker.FailureThreshold == 0 ||
+		c.Resilience.CircuitBreaker.OpenTimeout <= 0 ||
+		c.Resilience.CircuitBreaker.HalfOpenMaxRequests == 0 {
+		return fmt.Errorf("resilience.circuit_breaker settings must be positive")
+	}
 	if strings.TrimSpace(c.MySQL.DSN) == "" {
 		return fmt.Errorf("mysql.dsn is required")
 	}
@@ -232,61 +266,68 @@ func (c Role) Validate(role string) error {
 func mapEnvironmentKey(key string) string {
 	key = strings.TrimPrefix(key, "APP_")
 	mapping := map[string]string{
-		"ENVIRONMENT":                        "environment",
-		"SERVER_HTTP_PORT":                   "server.http_port",
-		"SERVER_MANAGEMENT_PORT":             "server.management_port",
-		"SERVER_READ_HEADER_TIMEOUT":         "server.read_header_timeout",
-		"SERVER_READ_TIMEOUT":                "server.read_timeout",
-		"SERVER_WRITE_TIMEOUT":               "server.write_timeout",
-		"SERVER_IDLE_TIMEOUT":                "server.idle_timeout",
-		"SERVER_SHUTDOWN_TIMEOUT":            "server.shutdown_timeout",
-		"SERVER_MAX_HEADER_BYTES":            "server.max_header_bytes",
-		"SERVER_MAX_BODY_BYTES":              "server.max_body_bytes",
-		"LOGGING_LEVEL":                      "logging.level",
-		"LOGGING_FORMAT":                     "logging.format",
-		"MYSQL_DSN":                          "mysql.dsn",
-		"MYSQL_MAX_OPEN_CONNS":               "mysql.max_open_conns",
-		"MYSQL_MAX_IDLE_CONNS":               "mysql.max_idle_conns",
-		"MYSQL_CONN_MAX_LIFETIME":            "mysql.conn_max_lifetime",
-		"MYSQL_CONN_MAX_IDLE_TIME":           "mysql.conn_max_idle_time",
-		"REDIS_ADDRESS":                      "redis.address",
-		"REDIS_PASSWORD":                     "redis.password",
-		"REDIS_DATABASE":                     "redis.database",
-		"REDIS_DIAL_TIMEOUT":                 "redis.dial_timeout",
-		"REDIS_READ_TIMEOUT":                 "redis.read_timeout",
-		"REDIS_WRITE_TIMEOUT":                "redis.write_timeout",
-		"IDENTITY_ACCESS_TOKEN_TTL":          "identity.access_token_ttl",
-		"IDENTITY_REFRESH_TOKEN_TTL":         "identity.refresh_token_ttl",
-		"IDENTITY_CAPTCHA_TTL":               "identity.captcha_ttl",
-		"IDENTITY_LOGIN_RATE_LIMIT":          "identity.login_rate_limit",
-		"IDENTITY_LOGIN_RATE_WINDOW":         "identity.login_rate_window",
-		"IDENTITY_BOOTSTRAP_USER":            "identity.bootstrap_user",
-		"IDENTITY_BOOTSTRAP_PASSWORD":        "identity.bootstrap_password",
-		"IDENTITY_DEFAULT_PASSWORD":          "identity.default_password",
-		"FILE_STORAGE_ROOT":                  "file_storage.root",
-		"FILE_STORAGE_TYPE":                  "file_storage.type",
-		"FILE_STORAGE_PUBLIC_BASE_URL":       "file_storage.public_base_url",
-		"FILE_STORAGE_MAX_FILE_BYTES":        "file_storage.max_file_bytes",
-		"FILE_STORAGE_S3_ENDPOINT":           "file_storage.s3.endpoint",
-		"FILE_STORAGE_S3_REGION":             "file_storage.s3.region",
-		"FILE_STORAGE_S3_BUCKET":             "file_storage.s3.bucket",
-		"FILE_STORAGE_S3_ACCESS_KEY":         "file_storage.s3.access_key",
-		"FILE_STORAGE_S3_SECRET_KEY":         "file_storage.s3.secret_key",
-		"FILE_STORAGE_S3_USE_PATH_STYLE":     "file_storage.s3.use_path_style",
-		"FILE_STORAGE_ALIYUN_OSS_ENDPOINT":   "file_storage.aliyun_oss.endpoint",
-		"FILE_STORAGE_ALIYUN_OSS_BUCKET":     "file_storage.aliyun_oss.bucket",
-		"FILE_STORAGE_ALIYUN_OSS_ACCESS_KEY": "file_storage.aliyun_oss.access_key",
-		"FILE_STORAGE_ALIYUN_OSS_SECRET_KEY": "file_storage.aliyun_oss.secret_key",
-		"ROCKETMQ_ENDPOINTS":                 "rocketmq.endpoints",
-		"ROCKETMQ_ACCESS_KEY":                "rocketmq.access_key",
-		"ROCKETMQ_SECRET_KEY":                "rocketmq.secret_key",
-		"ROCKETMQ_TOPIC_PREFIX":              "rocketmq.topic_prefix",
-		"ROCKETMQ_CONSUMER_GROUP":            "rocketmq.consumer_group",
-		"ROCKETMQ_AWAIT_DURATION":            "rocketmq.await_duration",
-		"ROCKETMQ_HANDLER_TIMEOUT":           "rocketmq.handler_timeout",
-		"ROCKETMQ_TOPICS":                    "rocketmq.topics",
-		"ROCKETMQ_CONCURRENCY":               "rocketmq.concurrency",
-		"ROCKETMQ_MAX_BODY_BYTES":            "rocketmq.max_body_bytes",
+		"ENVIRONMENT":                                  "environment",
+		"SERVER_HTTP_PORT":                             "server.http_port",
+		"SERVER_MANAGEMENT_PORT":                       "server.management_port",
+		"SERVER_READ_HEADER_TIMEOUT":                   "server.read_header_timeout",
+		"SERVER_READ_TIMEOUT":                          "server.read_timeout",
+		"SERVER_WRITE_TIMEOUT":                         "server.write_timeout",
+		"SERVER_IDLE_TIMEOUT":                          "server.idle_timeout",
+		"SERVER_SHUTDOWN_TIMEOUT":                      "server.shutdown_timeout",
+		"SERVER_MAX_HEADER_BYTES":                      "server.max_header_bytes",
+		"SERVER_MAX_BODY_BYTES":                        "server.max_body_bytes",
+		"LOGGING_LEVEL":                                "logging.level",
+		"LOGGING_FORMAT":                               "logging.format",
+		"MYSQL_DSN":                                    "mysql.dsn",
+		"MYSQL_MAX_OPEN_CONNS":                         "mysql.max_open_conns",
+		"MYSQL_MAX_IDLE_CONNS":                         "mysql.max_idle_conns",
+		"MYSQL_CONN_MAX_LIFETIME":                      "mysql.conn_max_lifetime",
+		"MYSQL_CONN_MAX_IDLE_TIME":                     "mysql.conn_max_idle_time",
+		"REDIS_ADDRESS":                                "redis.address",
+		"REDIS_PASSWORD":                               "redis.password",
+		"REDIS_DATABASE":                               "redis.database",
+		"REDIS_DIAL_TIMEOUT":                           "redis.dial_timeout",
+		"REDIS_READ_TIMEOUT":                           "redis.read_timeout",
+		"REDIS_WRITE_TIMEOUT":                          "redis.write_timeout",
+		"IDENTITY_ACCESS_TOKEN_TTL":                    "identity.access_token_ttl",
+		"IDENTITY_REFRESH_TOKEN_TTL":                   "identity.refresh_token_ttl",
+		"IDENTITY_CAPTCHA_TTL":                         "identity.captcha_ttl",
+		"IDENTITY_LOGIN_RATE_LIMIT":                    "identity.login_rate_limit",
+		"IDENTITY_LOGIN_RATE_WINDOW":                   "identity.login_rate_window",
+		"IDENTITY_BOOTSTRAP_USER":                      "identity.bootstrap_user",
+		"IDENTITY_BOOTSTRAP_PASSWORD":                  "identity.bootstrap_password",
+		"IDENTITY_DEFAULT_PASSWORD":                    "identity.default_password",
+		"FILE_STORAGE_ROOT":                            "file_storage.root",
+		"FILE_STORAGE_TYPE":                            "file_storage.type",
+		"FILE_STORAGE_PUBLIC_BASE_URL":                 "file_storage.public_base_url",
+		"FILE_STORAGE_MAX_FILE_BYTES":                  "file_storage.max_file_bytes",
+		"FILE_STORAGE_S3_ENDPOINT":                     "file_storage.s3.endpoint",
+		"FILE_STORAGE_S3_REGION":                       "file_storage.s3.region",
+		"FILE_STORAGE_S3_BUCKET":                       "file_storage.s3.bucket",
+		"FILE_STORAGE_S3_ACCESS_KEY":                   "file_storage.s3.access_key",
+		"FILE_STORAGE_S3_SECRET_KEY":                   "file_storage.s3.secret_key",
+		"FILE_STORAGE_S3_USE_PATH_STYLE":               "file_storage.s3.use_path_style",
+		"FILE_STORAGE_ALIYUN_OSS_ENDPOINT":             "file_storage.aliyun_oss.endpoint",
+		"FILE_STORAGE_ALIYUN_OSS_BUCKET":               "file_storage.aliyun_oss.bucket",
+		"FILE_STORAGE_ALIYUN_OSS_ACCESS_KEY":           "file_storage.aliyun_oss.access_key",
+		"FILE_STORAGE_ALIYUN_OSS_SECRET_KEY":           "file_storage.aliyun_oss.secret_key",
+		"ROCKETMQ_ENDPOINTS":                           "rocketmq.endpoints",
+		"ROCKETMQ_ACCESS_KEY":                          "rocketmq.access_key",
+		"ROCKETMQ_SECRET_KEY":                          "rocketmq.secret_key",
+		"ROCKETMQ_TOPIC_PREFIX":                        "rocketmq.topic_prefix",
+		"ROCKETMQ_CONSUMER_GROUP":                      "rocketmq.consumer_group",
+		"ROCKETMQ_AWAIT_DURATION":                      "rocketmq.await_duration",
+		"ROCKETMQ_HANDLER_TIMEOUT":                     "rocketmq.handler_timeout",
+		"ROCKETMQ_TOPICS":                              "rocketmq.topics",
+		"ROCKETMQ_CONCURRENCY":                         "rocketmq.concurrency",
+		"ROCKETMQ_MAX_BODY_BYTES":                      "rocketmq.max_body_bytes",
+		"RESILIENCE_HTTP_RATE_LIMIT_ENABLED":           "resilience.http_rate_limit.enabled",
+		"RESILIENCE_HTTP_RATE_LIMIT_RPS":               "resilience.http_rate_limit.requests_per_second",
+		"RESILIENCE_HTTP_RATE_LIMIT_BURST":             "resilience.http_rate_limit.burst",
+		"RESILIENCE_HTTP_RATE_LIMIT_CLIENT_TTL":        "resilience.http_rate_limit.client_ttl",
+		"RESILIENCE_CIRCUIT_BREAKER_FAILURE_THRESHOLD": "resilience.circuit_breaker.failure_threshold",
+		"RESILIENCE_CIRCUIT_BREAKER_OPEN_TIMEOUT":      "resilience.circuit_breaker.open_timeout",
+		"RESILIENCE_CIRCUIT_BREAKER_HALF_OPEN_MAX":     "resilience.circuit_breaker.half_open_max_requests",
 	}
 	if mapped, ok := mapping[key]; ok {
 		return mapped

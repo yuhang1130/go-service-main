@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -17,6 +18,7 @@ type HTTP struct {
 	server          *http.Server
 	shutdownTimeout time.Duration
 	logger          *slog.Logger
+	readyCallbacks  []func()
 }
 
 type Runner interface {
@@ -50,15 +52,28 @@ func (s *HTTP) OnShutdown(callback func()) {
 	}
 }
 
+func (s *HTTP) OnReady(callback func()) {
+	if callback != nil {
+		s.readyCallbacks = append(s.readyCallbacks, callback)
+	}
+}
+
 func (s *HTTP) Run(ctx context.Context) error {
 	s.logRoutes()
+	listener, err := net.Listen("tcp", s.server.Addr)
+	if err != nil {
+		return fmt.Errorf("%s server listen: %w", s.name, err)
+	}
 	errorsChannel := make(chan error, 1)
 	go func() {
-		s.logger.Info("http server started", "server", s.name, "address", s.server.Addr)
-		errorsChannel <- s.server.ListenAndServe()
+		errorsChannel <- s.server.Serve(listener)
 	}()
+	s.logger.Info("http server started", "server", s.name, "address", listener.Addr().String())
+	for _, callback := range s.readyCallbacks {
+		callback()
+	}
 	select {
-	case err := <-errorsChannel:
+	case err = <-errorsChannel:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}

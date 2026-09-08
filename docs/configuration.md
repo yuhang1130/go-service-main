@@ -8,6 +8,10 @@ Identity settings are `APP_IDENTITY_ACCESS_TOKEN_TTL`, `APP_IDENTITY_REFRESH_TOK
 
 Login requests are rate-limited by direct client IP and normalized username through Redis, preventing one noisy account from blocking every user behind the same reverse proxy. Configure the fixed window with `APP_IDENTITY_LOGIN_RATE_LIMIT` and `APP_IDENTITY_LOGIN_RATE_WINDOW`; both values must be positive. The API does not trust forwarded proxy headers by default, so explicitly review the trusted-proxy policy before relying on per-origin-IP limits behind a reverse proxy.
 
+The API also has a transport-level token-bucket limiter for all routes. Configure it with `APP_RESILIENCE_HTTP_RATE_LIMIT_ENABLED`, `APP_RESILIENCE_HTTP_RATE_LIMIT_RPS`, `APP_RESILIENCE_HTTP_RATE_LIMIT_BURST`, and `APP_RESILIENCE_HTTP_RATE_LIMIT_CLIENT_TTL`. It is keyed by the direct client IP because forwarded proxy headers are not trusted. The local API configuration enables it at 100 requests/second with a burst of 200; tune the values and trusted-proxy boundary together for production.
+
+The Job Outbox publisher uses a circuit breaker controlled by `APP_RESILIENCE_CIRCUIT_BREAKER_FAILURE_THRESHOLD`, `APP_RESILIENCE_CIRCUIT_BREAKER_OPEN_TIMEOUT`, and `APP_RESILIENCE_CIRCUIT_BREAKER_HALF_OPEN_MAX`. Rejected sends are ordinary publish failures to the relay: the Outbox row is marked for retry and is never treated as delivered.
+
 The API file adapter is selected with `APP_FILE_STORAGE_TYPE`: `local`, `s3`, or `aliyun_oss`. `APP_FILE_STORAGE_MAX_FILE_BYTES` must be positive and no larger than `APP_SERVER_MAX_BODY_BYTES`. Returned content URLs are intentionally public and use opaque generated keys so avatars and notice media can render without adding an authorization header.
 
 Local storage uses `APP_FILE_STORAGE_ROOT` and defaults to `.tmp/uploads`. Production must point it at a persistent writable mount.

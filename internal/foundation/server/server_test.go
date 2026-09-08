@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/yuhang1130/go-service-main/internal/foundation/config"
@@ -67,5 +68,30 @@ func TestRunAllWaitsForEveryRunner(t *testing.T) {
 	case <-stopped:
 	default:
 		t.Fatal("RunAll returned before every runner stopped")
+	}
+}
+
+func TestHTTPCallsOnReadyAfterBindingListener(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var called atomic.Bool
+	httpServer := New(
+		"test",
+		0,
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+		config.Defaults().Server,
+		slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
+	)
+	httpServer.OnReady(func() {
+		called.Store(true)
+		cancel()
+	})
+
+	if err := httpServer.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !called.Load() {
+		t.Fatal("OnReady callback was not called")
 	}
 }
