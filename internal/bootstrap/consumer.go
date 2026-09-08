@@ -46,9 +46,8 @@ func RunConsumer(ctx context.Context) (runErr error) {
 			if err := registerEventHandlers(eventRegistry, database.GORM(), cfg.RocketMQ.ConsumerGroup); err != nil {
 				return fmt.Errorf("register event handlers: %w", err)
 			}
-			if eventRegistry.Count() == 0 {
-				logger.Info("no event handlers registered; consumer running idle")
-				return nil
+			if err := requireEventHandlers(eventRegistry); err != nil {
+				return err
 			}
 			created, createErr := rocketmqadapter.NewConsumer(cfg.RocketMQ, eventRegistry, logger)
 			if createErr != nil {

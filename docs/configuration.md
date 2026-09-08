@@ -2,6 +2,11 @@
 
 Configuration precedence is code defaults, role YAML, then `APP_*` environment variables. Each Role loads only its own root configuration and fails startup when a capability used by that Role is missing. API, Job, and Consumer require MySQL; API also requires Redis for local identity sessions and captchas, while Job and Consumer require RocketMQ.
 
+Repository Role YAML files contain only non-secret settings. Before local startup,
+load the development values from `.env.example` into your shell or provide an
+equivalent ignored local environment file. Do not copy a working DSN or password
+back into `configs/*.yaml`.
+
 Use `APP_CONFIG_FILE` to select a role configuration file. Every field exposed in the role YAML has an explicit `APP_` override. Common examples include `APP_SERVER_HTTP_PORT`, `APP_SERVER_MANAGEMENT_PORT`, `APP_LOGGING_LEVEL`, `APP_LOGGING_FORMAT`, `APP_MYSQL_DSN`, `APP_MYSQL_CONN_MAX_LIFETIME`, `APP_REDIS_ADDRESS`, `APP_REDIS_READ_TIMEOUT`, `APP_ROCKETMQ_HANDLER_TIMEOUT`, and `APP_ROCKETMQ_CONCURRENCY`. Set `APP_ROCKETMQ_TOPICS` to a comma-separated list. RocketMQ credentials may both be empty for an unauthenticated local broker; otherwise AccessKey and SecretKey must be configured together.
 
 Identity settings are `APP_IDENTITY_ACCESS_TOKEN_TTL`, `APP_IDENTITY_REFRESH_TOKEN_TTL`, and `APP_IDENTITY_CAPTCHA_TTL`. Initial credentials are secret-only settings: `APP_IDENTITY_BOOTSTRAP_USER` and `APP_IDENTITY_BOOTSTRAP_PASSWORD` must be supplied together and create a ROOT account only when no active account exists. `APP_IDENTITY_DEFAULT_PASSWORD` is required before an administrator can create another account. Both password settings must contain at least eight characters and must not be committed.
@@ -30,4 +35,4 @@ Migration `20260905000100` changes soft-delete uniqueness to generated active-ke
 
 Production secrets belong in environment or platform secret injection. They must not appear in YAML, logs, health responses, build information, or error messages.
 
-The runtime image contains the repository's non-secret Role YAML files under `/configs`; environment variables override them. `APP_CONFIG_FILE` may point to a mounted alternative, but secrets should still be injected through the deployment platform rather than baked into that file.
+The runtime image contains the repository's non-secret Role YAML files under `/configs`; environment variables supply required connection settings and override other values. `APP_CONFIG_FILE` may point to a mounted alternative, but secrets should still be injected through the deployment platform rather than baked into that file.

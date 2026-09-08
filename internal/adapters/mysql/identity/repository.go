@@ -8,7 +8,6 @@ import (
 	"time"
 
 	mysqladapter "github.com/yuhang1130/go-service-main/internal/adapters/mysql"
-	accessdomain "github.com/yuhang1130/go-service-main/internal/features/accesscontrol/domain"
 	identityapp "github.com/yuhang1130/go-service-main/internal/features/identity/application"
 	identitydomain "github.com/yuhang1130/go-service-main/internal/features/identity/domain"
 	"gorm.io/gorm"
@@ -16,6 +15,8 @@ import (
 )
 
 type Repository struct{ database *gorm.DB }
+
+const rootRoleCode = "ROOT"
 
 func NewRepository(database *gorm.DB) *Repository { return &Repository{database: database} }
 
@@ -87,7 +88,7 @@ func (r *Repository) Get(ctx context.Context, id int64) (identitydomain.Account,
 	return account, nil
 }
 
-func (r *Repository) List(ctx context.Context, query identityapp.ListQuery, scope accessdomain.AccountScope) ([]identitydomain.Account, int64, error) {
+func (r *Repository) List(ctx context.Context, query identityapp.ListQuery, scope identityapp.AccountScope) ([]identitydomain.Account, int64, error) {
 	countDatabase := r.database.WithContext(ctx).Table("sys_user AS account").Where("account.is_deleted = 0")
 	countDatabase = filterAccounts(countDatabase, query, scope)
 	var total int64
@@ -107,7 +108,7 @@ func (r *Repository) List(ctx context.Context, query identityapp.ListQuery, scop
 	return items, total, nil
 }
 
-func (r *Repository) Export(ctx context.Context, query identityapp.ListQuery, scope accessdomain.AccountScope, limit int) ([]identitydomain.Account, error) {
+func (r *Repository) Export(ctx context.Context, query identityapp.ListQuery, scope identityapp.AccountScope, limit int) ([]identitydomain.Account, error) {
 	var rows []accountViewRow
 	database := filterAccounts(r.accountView(ctx), query, scope)
 	if err := database.Group("account.id, department.name").Order("account.create_time DESC, account.id DESC").Limit(limit).Find(&rows).Error; err != nil {
@@ -120,7 +121,7 @@ func (r *Repository) Export(ctx context.Context, query identityapp.ListQuery, sc
 	return items, nil
 }
 
-func filterAccounts(database *gorm.DB, query identityapp.ListQuery, scope accessdomain.AccountScope) *gorm.DB {
+func filterAccounts(database *gorm.DB, query identityapp.ListQuery, scope identityapp.AccountScope) *gorm.DB {
 	database = applyScope(database, scope)
 	if keyword := strings.TrimSpace(query.Keywords); keyword != "" {
 		database = database.Where("account.username LIKE ? OR account.nickname LIKE ? OR account.mobile LIKE ?", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
@@ -140,7 +141,7 @@ func filterAccounts(database *gorm.DB, query identityapp.ListQuery, scope access
 	return database
 }
 
-func (r *Repository) Options(ctx context.Context, scope accessdomain.AccountScope) ([]identitydomain.Account, error) {
+func (r *Repository) Options(ctx context.Context, scope identityapp.AccountScope) ([]identitydomain.Account, error) {
 	var rows []accountRow
 	database := r.database.WithContext(ctx).Table("sys_user AS account").Where("account.status = 1 AND account.is_deleted = 0")
 	database = applyScope(database, scope)
@@ -158,6 +159,24 @@ func (r *Repository) UsernameExists(ctx context.Context, username string, exclud
 	var count int64
 	err := r.database.WithContext(ctx).Model(&accountRow{}).Where("username = ? AND id <> ? AND is_deleted = 0", username, excludeID).Count(&count).Error
 	return count > 0, err
+}
+
+func (r *Repository) ExistingUsernames(ctx context.Context, usernames []string) (map[string]struct{}, error) {
+	result := make(map[string]struct{})
+	usernames = uniqueStrings(usernames)
+	if len(usernames) == 0 {
+		return result, nil
+	}
+	var existing []string
+	if err := r.database.WithContext(ctx).Model(&accountRow{}).
+		Where("username IN ? AND is_deleted = 0", usernames).
+		Pluck("username", &existing).Error; err != nil {
+		return nil, err
+	}
+	for _, username := range existing {
+		result[username] = struct{}{}
+	}
+	return result, nil
 }
 
 func (r *Repository) Save(ctx context.Context, account identitydomain.Account, roleIDs []int64, actorID int64) error {
@@ -252,7 +271,7 @@ func (r *Repository) updateOne(ctx context.Context, id int64, updates map[string
 	return nil
 }
 
-func (r *Repository) Bootstrap(ctx context.Context, account identitydomain.Account, roleCode string) (bool, error) {
+func (r *Repository) Bootstrap(ctx context.Context, account identitydomain.Account) (bool, error) {
 	created := false
 	err := r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
 		var count int64
@@ -263,7 +282,7 @@ func (r *Repository) Bootstrap(ctx context.Context, account identitydomain.Accou
 			return nil
 		}
 		var roleID int64
-		if err := transaction.Table("sys_role").Where("code = ? AND status = 1 AND is_deleted = 0", roleCode).Pluck("id", &roleID).Error; err != nil {
+		if err := transaction.Table("sys_role").Where("code = ? AND status = 1 AND is_deleted = 0", rootRoleCode).Pluck("id", &roleID).Error; err != nil {
 			return err
 		}
 		if roleID == 0 {
@@ -289,7 +308,7 @@ func (r *Repository) Bootstrap(ctx context.Context, account identitydomain.Accou
 
 func (r *Repository) IsRoot(ctx context.Context, id int64) (bool, error) {
 	var count int64
-	err := r.database.WithContext(ctx).Table("sys_user_role AS user_role").Joins("JOIN sys_role AS role ON role.id = user_role.role_id").Where("user_role.user_id = ? AND role.code = ? AND role.is_deleted = 0", id, accessdomain.RootRoleCode).Count(&count).Error
+	err := r.database.WithContext(ctx).Table("sys_user_role AS user_role").Joins("JOIN sys_role AS role ON role.id = user_role.role_id").Where("user_role.user_id = ? AND role.code = ? AND role.is_deleted = 0", id, rootRoleCode).Count(&count).Error
 	return count > 0, err
 }
 
@@ -349,7 +368,7 @@ func (r *Repository) accountView(ctx context.Context) *gorm.DB {
 		Where("account.is_deleted = 0")
 }
 
-func applyScope(database *gorm.DB, scope accessdomain.AccountScope) *gorm.DB {
+func applyScope(database *gorm.DB, scope identityapp.AccountScope) *gorm.DB {
 	if scope.All {
 		return database
 	}
@@ -357,6 +376,23 @@ func applyScope(database *gorm.DB, scope accessdomain.AccountScope) *gorm.DB {
 		return database.Where("account.id = ?", scope.SelfID)
 	}
 	return database.Where("account.id = ? OR account.dept_id IN ?", scope.SelfID, scope.DepartmentIDs)
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func accountToDomain(row accountRow) identitydomain.Account {

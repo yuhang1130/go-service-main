@@ -1,6 +1,8 @@
 package bootstrap
 
 import (
+	"context"
+
 	redisclient "github.com/redis/go-redis/v9"
 	localauth "github.com/yuhang1130/go-service-main/internal/adapters/auth/local"
 	passwordauth "github.com/yuhang1130/go-service-main/internal/adapters/auth/password"
@@ -29,7 +31,7 @@ type identityAccessAPI struct {
 func wireIdentityAccessAPI(database *gorm.DB, redis *redisclient.Client, cfg config.Identity) identityAccessAPI {
 	sessions := identityredis.NewStore(redis, cfg)
 	access := accessapp.NewService(accessmysql.NewRepository(database), sessions)
-	identities := identityapp.NewService(identitymysql.NewRepository(database), sessions, sessions, passwordauth.NewBcrypt(), access, cfg.DefaultPassword)
+	identities := identityapp.NewService(identitymysql.NewRepository(database), sessions, sessions, passwordauth.NewBcrypt(), identityAuthorizer{access}, cfg.DefaultPassword)
 	organizations := organizationapp.NewService(organizationmysql.NewRepository(database))
 	return identityAccessAPI{
 		identity:     identities,
@@ -39,3 +41,33 @@ func wireIdentityAccessAPI(database *gorm.DB, redis *redisclient.Client, cfg con
 		verifier:     localauth.NewVerifier(identities),
 	}
 }
+
+type identityAuthorizer struct {
+	access *accessapp.Service
+}
+
+func (a identityAuthorizer) Authorization(ctx context.Context, accountID int64) (identityapp.Authorization, error) {
+	authorization, err := a.access.Authorization(ctx, accountID)
+	if err != nil {
+		return identityapp.Authorization{}, err
+	}
+	return identityapp.Authorization{
+		Roles:       authorization.Roles,
+		Permissions: authorization.Permissions,
+		System:      authorization.System,
+	}, nil
+}
+
+func (a identityAuthorizer) Scope(ctx context.Context, accountID int64) (identityapp.AccountScope, error) {
+	scope, err := a.access.Scope(ctx, accountID)
+	if err != nil {
+		return identityapp.AccountScope{}, err
+	}
+	return identityapp.AccountScope{
+		All:           scope.All,
+		SelfID:        scope.SelfID,
+		DepartmentIDs: scope.DepartmentIDs,
+	}, nil
+}
+
+var _ identityapp.Authorizer = identityAuthorizer{}

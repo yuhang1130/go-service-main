@@ -76,6 +76,19 @@ func TestRepositoryValidatesRoleAssociationsBeforeReplacement(t *testing.T) {
 	}
 	departmentIDs, err := repository.RoleDepartmentIDs(ctx, roleID)
 	assertIDs(t, departmentIDs, err, []int64{1})
+
+	if err := repository.DeleteRoles(ctx, []int64{roleID, 1}, 0); !errors.Is(err, application.ErrProtectedRole) {
+		t.Fatalf("DeleteRoles() protected-role error = %v", err)
+	}
+	if exists, err := repository.RoleCodeExists(ctx, code, 0); err != nil || !exists {
+		t.Fatalf("atomic protected-role rejection removed ordinary role: exists %v, error %v", exists, err)
+	}
+	if err := repository.DeleteRoles(ctx, []int64{roleID}, 0); err != nil {
+		t.Fatalf("DeleteRoles() error = %v", err)
+	}
+	if exists, err := repository.RoleCodeExists(ctx, code, 0); err != nil || exists {
+		t.Fatalf("soft-deleted role remains active: exists %v, error %v", exists, err)
+	}
 }
 
 func assertIDs(t *testing.T, ids []int64, err error, want []int64) {

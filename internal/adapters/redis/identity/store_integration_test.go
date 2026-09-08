@@ -15,7 +15,7 @@ import (
 	"time"
 
 	redisadapter "github.com/yuhang1130/go-service-main/internal/adapters/redis"
-	"github.com/yuhang1130/go-service-main/internal/features/identity/domain"
+	identityapp "github.com/yuhang1130/go-service-main/internal/features/identity/application"
 	"github.com/yuhang1130/go-service-main/internal/foundation/config"
 )
 
@@ -102,7 +102,7 @@ func TestStoreRotatesAndRevokesSessionsAndCaptchas(t *testing.T) {
 		t.Fatal(err)
 	}
 	racingStart := make(chan struct{})
-	racingPairs := make([]domain.TokenPair, 2)
+	racingPairs := make([]identityapp.TokenPair, 2)
 	racingErrors := make([]error, 2)
 	var racingWait sync.WaitGroup
 	for index := range racingErrors {
@@ -117,7 +117,7 @@ func TestStoreRotatesAndRevokesSessionsAndCaptchas(t *testing.T) {
 	racingWait.Wait()
 	successes := 0
 	reuses := 0
-	var racedPair domain.TokenPair
+	var racedPair identityapp.TokenPair
 	for index, refreshErr := range racingErrors {
 		switch {
 		case refreshErr == nil:
@@ -142,7 +142,7 @@ func TestStoreRotatesAndRevokesSessionsAndCaptchas(t *testing.T) {
 	}
 	start := make(chan struct{})
 	var wait sync.WaitGroup
-	var refreshed domain.TokenPair
+	var refreshed identityapp.TokenPair
 	var refreshErr, invalidateErr error
 	wait.Add(2)
 	go func() {

@@ -232,13 +232,13 @@ func (c Role) Validate(role string) error {
 	if c.Server.ShutdownTimeout <= 0 {
 		return fmt.Errorf("server.shutdown_timeout must be positive")
 	}
-	if c.Resilience.HTTPRateLimit.Enabled &&
+	if role == "api" && c.Resilience.HTTPRateLimit.Enabled &&
 		(c.Resilience.HTTPRateLimit.RequestsPerSecond <= 0 || c.Resilience.HTTPRateLimit.Burst <= 0 || c.Resilience.HTTPRateLimit.ClientTTL <= 0) {
 		return fmt.Errorf("resilience.http_rate_limit settings must be positive when enabled")
 	}
-	if c.Resilience.CircuitBreaker.FailureThreshold == 0 ||
+	if role == "job" && (c.Resilience.CircuitBreaker.FailureThreshold == 0 ||
 		c.Resilience.CircuitBreaker.OpenTimeout <= 0 ||
-		c.Resilience.CircuitBreaker.HalfOpenMaxRequests == 0 {
+		c.Resilience.CircuitBreaker.HalfOpenMaxRequests == 0) {
 		return fmt.Errorf("resilience.circuit_breaker settings must be positive")
 	}
 	if strings.TrimSpace(c.MySQL.DSN) == "" {

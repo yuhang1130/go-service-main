@@ -32,24 +32,3 @@ func (a Account) Validate() error {
 	}
 	return nil
 }
-
-type Current struct {
-	UserID      int64    `json:"userId"`
-	Username    string   `json:"username"`
-	Nickname    string   `json:"nickname"`
-	Avatar      string   `json:"avatar"`
-	Roles       []string `json:"roles"`
-	Permissions []string `json:"perms"`
-}
-
-type TokenPair struct {
-	AccessToken  string `json:"accessToken"`
-	RefreshToken string `json:"refreshToken"`
-	TokenType    string `json:"tokenType"`
-	ExpiresIn    int64  `json:"expiresIn"`
-}
-
-type Captcha struct {
-	ID    string
-	Image string
-}

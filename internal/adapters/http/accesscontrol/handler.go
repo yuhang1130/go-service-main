@@ -112,11 +112,9 @@ func (h *Handler) deleteRole(ctx *gin.Context) {
 		return
 	}
 	actorID, _ := adminapi.AccountID(ctx)
-	for _, id := range ids {
-		if err := h.service.DeleteRole(ctx.Request.Context(), id, actorID); err != nil {
-			adminapi.Error(ctx, err)
-			return
-		}
+	if err := h.service.DeleteRoles(ctx.Request.Context(), ids, actorID); err != nil {
+		adminapi.Error(ctx, err)
+		return
 	}
 	adminapi.OKMessage(ctx, "删除成功")
 }
@@ -212,7 +210,48 @@ func (h *Handler) routes(ctx *gin.Context) {
 		adminapi.Error(ctx, err)
 		return
 	}
-	adminapi.OK(ctx, routes)
+	adminapi.OK(ctx, routesToResponse(routes))
+}
+
+type routeResponse struct {
+	Path      string          `json:"path"`
+	Name      string          `json:"name"`
+	Component string          `json:"component"`
+	Redirect  string          `json:"redirect,omitempty"`
+	Meta      *routeMeta      `json:"meta,omitempty"`
+	Children  []routeResponse `json:"children,omitempty"`
+}
+
+type routeMeta struct {
+	Title       string         `json:"title"`
+	Icon        string         `json:"icon,omitempty"`
+	Hidden      bool           `json:"hidden,omitempty"`
+	AlwaysShow  bool           `json:"alwaysShow,omitempty"`
+	KeepAlive   bool           `json:"keepAlive,omitempty"`
+	Params      map[string]any `json:"params,omitempty"`
+	ExternalURL string         `json:"externalUrl,omitempty"`
+}
+
+func routesToResponse(routes []*accessapp.Route) []routeResponse {
+	result := make([]routeResponse, len(routes))
+	for index, route := range routes {
+		response := routeResponse{
+			Path: route.Path, Name: route.Name, Component: route.Component,
+			Redirect: route.Redirect, Children: routesToResponse(route.Children),
+		}
+		if route.Meta != nil {
+			response.Meta = &routeMeta{
+				Title: route.Meta.Title, Icon: route.Meta.Icon, Hidden: route.Meta.Hidden,
+				AlwaysShow: route.Meta.AlwaysShow, KeepAlive: route.Meta.KeepAlive,
+				Params: route.Meta.Params, ExternalURL: route.Meta.ExternalURL,
+			}
+		}
+		if len(response.Children) == 0 {
+			response.Children = nil
+		}
+		result[index] = response
+	}
+	return result
 }
 
 func (h *Handler) menuForm(ctx *gin.Context) {

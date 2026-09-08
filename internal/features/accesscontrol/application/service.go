@@ -61,8 +61,7 @@ type Repository interface {
 	RoleCodeExists(context.Context, string, int64) (bool, error)
 	RoleNameExists(context.Context, string, int64) (bool, error)
 	SaveRole(context.Context, domain.Role, int64) error
-	DeleteRole(context.Context, int64, int64) error
-	RoleInUse(context.Context, int64) (bool, error)
+	DeleteRoles(context.Context, []int64, int64) error
 	RoleMenuIDs(context.Context, int64) ([]int64, error)
 	SetRoleMenus(context.Context, int64, []int64, int64) error
 	RoleDepartmentIDs(context.Context, int64) ([]int64, error)
@@ -180,22 +179,25 @@ func (s *Service) SaveRole(ctx context.Context, command RoleCommand, actorID int
 }
 
 func (s *Service) DeleteRole(ctx context.Context, id, actorID int64) error {
-	role, err := s.repository.GetRole(ctx, id)
-	if err != nil {
-		return mapError(err, "角色不存在")
+	return s.DeleteRoles(ctx, []int64{id}, actorID)
+}
+
+func (s *Service) DeleteRoles(ctx context.Context, ids []int64, actorID int64) error {
+	ids = uniquePositiveIDs(ids)
+	if len(ids) == 0 {
+		return apperror.InvalidArgument(apperror.CodeInvalidArgument, "角色ID无效", nil)
 	}
-	if role.Code == domain.RootRoleCode {
-		return apperror.Forbidden(apperror.CodeForbidden, "超级管理员角色不能删除")
-	}
-	used, err := s.repository.RoleInUse(ctx, id)
-	if err != nil {
-		return apperror.Internal(err)
-	}
-	if used {
-		return apperror.Conflict(apperror.CodeConflict, "角色已分配给用户，不能删除")
-	}
-	if err := s.repository.DeleteRole(ctx, id, actorID); err != nil {
-		return apperror.Internal(err)
+	if err := s.repository.DeleteRoles(ctx, ids, actorID); err != nil {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			return apperror.NotFound(apperror.CodeNotFound, "角色不存在")
+		case errors.Is(err, ErrProtectedRole):
+			return apperror.Forbidden(apperror.CodeForbidden, "超级管理员角色不能删除")
+		case errors.Is(err, ErrRoleInUse):
+			return apperror.Conflict(apperror.CodeConflict, "角色已分配给用户，不能删除")
+		default:
+			return apperror.Internal(err)
+		}
 	}
 	return nil
 }
@@ -263,7 +265,7 @@ func (s *Service) MenuOptions(ctx context.Context, parentOnly bool) ([]*domain.M
 	return domain.BuildMenuTree(items), nil
 }
 
-func (s *Service) Routes(ctx context.Context, accountID int64) ([]*domain.Route, error) {
+func (s *Service) Routes(ctx context.Context, accountID int64) ([]*Route, error) {
 	authorization, err := s.Authorization(ctx, accountID)
 	if err != nil {
 		return nil, err
@@ -272,7 +274,7 @@ func (s *Service) Routes(ctx context.Context, accountID int64) ([]*domain.Route,
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
-	return domain.BuildRoutes(items), nil
+	return BuildRoutes(items), nil
 }
 
 func (s *Service) GetMenu(ctx context.Context, id int64) (domain.Menu, error) {
@@ -360,6 +362,22 @@ func (s *Service) invalidateRoleSessions(ctx context.Context, roleID int64) {
 	for _, accountID := range accountIDs {
 		_ = s.sessions.InvalidateUser(ctx, accountID)
 	}
+}
+
+func uniquePositiveIDs(ids []int64) []int64 {
+	seen := make(map[int64]struct{}, len(ids))
+	result := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result
 }
 
 func normalizePage(query *PageQuery) {

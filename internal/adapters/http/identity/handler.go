@@ -100,7 +100,7 @@ func (h *Handler) login(ctx *gin.Context) {
 		adminapi.Error(ctx, err)
 		return
 	}
-	adminapi.OK(ctx, tokens)
+	adminapi.OK(ctx, tokenPairToResponse(tokens))
 }
 
 func (h *Handler) refresh(ctx *gin.Context) {
@@ -114,7 +114,23 @@ func (h *Handler) refresh(ctx *gin.Context) {
 		adminapi.Error(ctx, err)
 		return
 	}
-	adminapi.OK(ctx, tokens)
+	adminapi.OK(ctx, tokenPairToResponse(tokens))
+}
+
+type tokenPairResponse struct {
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken"`
+	TokenType    string `json:"tokenType"`
+	ExpiresIn    int64  `json:"expiresIn"`
+}
+
+func tokenPairToResponse(tokens identityapp.TokenPair) tokenPairResponse {
+	return tokenPairResponse{
+		AccessToken:  tokens.AccessToken,
+		RefreshToken: tokens.RefreshToken,
+		TokenType:    tokens.TokenType,
+		ExpiresIn:    tokens.ExpiresIn,
+	}
 }
 
 func (h *Handler) logout(ctx *gin.Context) {

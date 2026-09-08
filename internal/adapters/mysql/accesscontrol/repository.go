@@ -205,26 +205,46 @@ func (r *Repository) SaveRole(ctx context.Context, role domain.Role, actorID int
 	}))
 }
 
-func (r *Repository) DeleteRole(ctx context.Context, id, actorID int64) error {
+func (r *Repository) DeleteRoles(ctx context.Context, ids []int64, actorID int64) error {
+	ids = uniqueIDs(ids)
 	return r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
-		result := transaction.Model(&roleRow{}).Where("id = ? AND is_deleted = 0", id).Updates(map[string]any{"is_deleted": 1, "update_by": actorID, "update_time": time.Now().UTC()})
+		var roles []roleRow
+		if err := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id IN ? AND is_deleted = 0", ids).
+			Find(&roles).Error; err != nil {
+			return err
+		}
+		if len(roles) != len(ids) {
+			return application.ErrNotFound
+		}
+		for _, role := range roles {
+			if role.Code == domain.RootRoleCode {
+				return application.ErrProtectedRole
+			}
+		}
+		var assigned int64
+		if err := transaction.Table("sys_user_role").
+			Where("role_id IN ?", ids).
+			Count(&assigned).Error; err != nil {
+			return err
+		}
+		if assigned != 0 {
+			return application.ErrRoleInUse
+		}
+		result := transaction.Model(&roleRow{}).
+			Where("id IN ? AND is_deleted = 0", ids).
+			Updates(map[string]any{"is_deleted": 1, "update_by": actorID, "update_time": time.Now().UTC()})
 		if result.Error != nil {
 			return result.Error
 		}
-		if result.RowsAffected != 1 {
+		if result.RowsAffected != int64(len(ids)) {
 			return application.ErrNotFound
 		}
-		if err := transaction.Exec("DELETE FROM sys_role_menu WHERE role_id = ?", id).Error; err != nil {
+		if err := transaction.Exec("DELETE FROM sys_role_menu WHERE role_id IN ?", ids).Error; err != nil {
 			return err
 		}
-		return transaction.Exec("DELETE FROM sys_role_dept WHERE role_id = ?", id).Error
+		return transaction.Exec("DELETE FROM sys_role_dept WHERE role_id IN ?", ids).Error
 	})
-}
-
-func (r *Repository) RoleInUse(ctx context.Context, id int64) (bool, error) {
-	var count int64
-	err := r.database.WithContext(ctx).Table("sys_user_role").Where("role_id = ?", id).Count(&count).Error
-	return count > 0, err
 }
 
 func (r *Repository) RoleMenuIDs(ctx context.Context, id int64) ([]int64, error) {

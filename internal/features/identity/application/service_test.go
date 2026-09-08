@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"testing"
 
-	accessdomain "github.com/yuhang1130/go-service-main/internal/features/accesscontrol/domain"
 	identitydomain "github.com/yuhang1130/go-service-main/internal/features/identity/domain"
 	"github.com/yuhang1130/go-service-main/internal/foundation/apperror"
 	"github.com/yuhang1130/go-service-main/internal/foundation/persistence"
@@ -14,11 +13,15 @@ import (
 
 type repositoryStub struct {
 	Repository
-	account  identitydomain.Account
-	root     bool
-	count    int64
-	created  bool
-	writeErr error
+	account   identitydomain.Account
+	root      bool
+	count     int64
+	created   bool
+	writeErr  error
+	existing  map[string]struct{}
+	lookupErr error
+	lookups   *int
+	imported  *[]identitydomain.Account
 }
 
 func (r repositoryStub) GetByUsername(context.Context, string) (identitydomain.Account, error) {
@@ -33,11 +36,32 @@ func (r repositoryStub) IsRoot(context.Context, int64) (bool, error) { return r.
 
 func (r repositoryStub) Count(context.Context) (int64, error) { return r.count, nil }
 
-func (r repositoryStub) Bootstrap(context.Context, identitydomain.Account, string) (bool, error) {
+func (r repositoryStub) Bootstrap(context.Context, identitydomain.Account) (bool, error) {
 	return r.created, r.writeErr
 }
 
 func (repositoryStub) UsernameExists(context.Context, string, int64) (bool, error) { return false, nil }
+
+func (r repositoryStub) ExistingUsernames(context.Context, []string) (map[string]struct{}, error) {
+	if r.lookups != nil {
+		*r.lookups++
+	}
+	return r.existing, r.lookupErr
+}
+
+func (repositoryStub) ImportReferences(context.Context) (ImportReferences, error) {
+	return ImportReferences{
+		Roles:       map[string]int64{"USER": 2},
+		Departments: map[string]int64{"DEFAULT": 1},
+	}, nil
+}
+
+func (r repositoryStub) Import(_ context.Context, accounts []identitydomain.Account, _ int64) error {
+	if r.imported != nil {
+		*r.imported = append([]identitydomain.Account(nil), accounts...)
+	}
+	return r.writeErr
+}
 
 func (r repositoryStub) Save(context.Context, identitydomain.Account, []int64, int64) error {
 	return r.writeErr
@@ -45,18 +69,18 @@ func (r repositoryStub) Save(context.Context, identitydomain.Account, []int64, i
 
 type sessionsStub struct {
 	Sessions
-	tokens     identitydomain.TokenPair
+	tokens     TokenPair
 	accountID  int64
 	refreshErr error
 }
 
-func (s sessionsStub) Create(context.Context, int64) (identitydomain.TokenPair, error) {
+func (s sessionsStub) Create(context.Context, int64) (TokenPair, error) {
 	return s.tokens, nil
 }
 
 func (s sessionsStub) AccountID(context.Context, string) (int64, error) { return s.accountID, nil }
 
-func (s sessionsStub) Refresh(context.Context, string) (identitydomain.TokenPair, error) {
+func (s sessionsStub) Refresh(context.Context, string) (TokenPair, error) {
 	return s.tokens, s.refreshErr
 }
 
@@ -74,12 +98,12 @@ func (passwordsStub) Hash(string) (string, error)     { return "hash", nil }
 
 type authorizerStub struct{ Authorizer }
 
-func (authorizerStub) Authorization(context.Context, int64) (accessdomain.Authorization, error) {
-	return accessdomain.Authorization{}, nil
+func (authorizerStub) Authorization(context.Context, int64) (Authorization, error) {
+	return Authorization{}, nil
 }
 
 func TestLoginReturnsOpaqueSessionPair(t *testing.T) {
-	want := identitydomain.TokenPair{AccessToken: "access", RefreshToken: "refresh", TokenType: "Bearer", ExpiresIn: 7200}
+	want := TokenPair{AccessToken: "access", RefreshToken: "refresh", TokenType: "Bearer", ExpiresIn: 7200}
 	service := NewService(
 		repositoryStub{account: identitydomain.Account{ID: 7, Password: "hash", Status: 1}},
 		sessionsStub{tokens: want}, captchasStub{valid: true}, passwordsStub{}, authorizerStub{}, "",
@@ -187,5 +211,49 @@ func TestSaveMapsInvalidAssociationsToBadRequest(t *testing.T) {
 	applicationError := apperror.As(err)
 	if applicationError.HTTPStatus != http.StatusBadRequest || applicationError.Code != apperror.CodeInvalidArgument {
 		t.Fatalf("Save() error = %#v, want HTTP 400/%s", applicationError, apperror.CodeInvalidArgument)
+	}
+}
+
+func TestImportChecksExistingUsernamesInOneBatch(t *testing.T) {
+	t.Parallel()
+	lookups := 0
+	var imported []identitydomain.Account
+	service := NewService(
+		repositoryStub{
+			existing: map[string]struct{}{"existing": {}},
+			lookups:  &lookups,
+			imported: &imported,
+		},
+		sessionsStub{}, captchasStub{}, passwordsStub{}, authorizerStub{}, "password123",
+	)
+
+	result, err := service.Import(context.Background(), []ImportCandidate{
+		{Row: 2, Username: "existing", Nickname: "Existing", Gender: 0, Status: 1, RoleTokens: []string{"USER"}, Department: "DEFAULT"},
+		{Row: 3, Username: "new-user", Nickname: "New", Gender: 0, Status: 1, RoleTokens: []string{"USER"}, Department: "DEFAULT"},
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lookups != 1 {
+		t.Fatalf("existing username lookups = %d, want 1", lookups)
+	}
+	if result.ValidCount != 1 || result.InvalidCount != 1 || len(imported) != 1 || imported[0].Username != "new-user" {
+		t.Fatalf("result = %#v, imported = %#v", result, imported)
+	}
+}
+
+func TestImportReturnsInfrastructureFailure(t *testing.T) {
+	t.Parallel()
+	service := NewService(
+		repositoryStub{lookupErr: errors.New("database unavailable")},
+		sessionsStub{}, captchasStub{}, passwordsStub{}, authorizerStub{}, "password123",
+	)
+
+	_, err := service.Import(context.Background(), []ImportCandidate{
+		{Row: 2, Username: "new-user", Nickname: "New", Gender: 0, Status: 1, RoleTokens: []string{"USER"}},
+	}, 1)
+	applicationError := apperror.As(err)
+	if applicationError.HTTPStatus != http.StatusInternalServerError {
+		t.Fatalf("error = %#v, want HTTP 500", applicationError)
 	}
 }

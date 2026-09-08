@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -32,9 +33,18 @@ redis.call('SET', KEYS[2], ARGV[2], 'PX', ARGV[3])
 return 1
 `)
 
-type Cache struct{ client *redisclient.Client }
+type Cache struct {
+	client *redisclient.Client
+	logger *slog.Logger
+}
 
-func NewCache(client *redisclient.Client) *Cache { return &Cache{client: client} }
+func NewCache(client *redisclient.Client, logger ...*slog.Logger) *Cache {
+	cache := &Cache{client: client}
+	if len(logger) > 0 {
+		cache.logger = logger[0]
+	}
+	return cache
+}
 
 func (c *Cache) Get(ctx context.Context, key string) (configurationdomain.Config, bool, uint64, error) {
 	values, err := getVersionedScript.Run(ctx, c.client, []string{versionKey}, dataPrefix, key).Slice()
@@ -74,5 +84,26 @@ func (c *Cache) Invalidate(ctx context.Context, key string) error {
 }
 
 func (c *Cache) InvalidateAll(ctx context.Context) error {
-	return c.client.Incr(ctx, versionKey).Err()
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if err := c.client.Incr(ctx, versionKey).Err(); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if attempt < 3 {
+			delay := time.Duration(attempt*25) * time.Millisecond
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+	}
+	if c.logger != nil {
+		c.logger.Warn("configuration cache invalidation failed", "attempts", 3, "error", lastErr)
+	}
+	return lastErr
 }

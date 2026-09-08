@@ -3,11 +3,9 @@ package application
 import (
 	"context"
 	"errors"
-	"strconv"
 	"strings"
 	"time"
 
-	accessdomain "github.com/yuhang1130/go-service-main/internal/features/accesscontrol/domain"
 	"github.com/yuhang1130/go-service-main/internal/features/identity/domain"
 	"github.com/yuhang1130/go-service-main/internal/foundation/apperror"
 	"github.com/yuhang1130/go-service-main/internal/foundation/persistence"
@@ -55,59 +53,36 @@ type PasswordCommand struct {
 	ConfirmPassword string
 }
 
-type ImportCandidate struct {
-	Row        int
-	Username   string
-	Nickname   string
-	Mobile     string
-	Gender     int
-	Email      string
-	RoleTokens []string
-	Department string
-	Status     int
-	ParseError string
-}
-
-type ImportReferences struct {
-	Roles       map[string]int64
-	Departments map[string]int64
-}
-
-type ImportResult struct {
-	ValidCount   int
-	InvalidCount int
-	Messages     []string
-}
-
 type Repository interface {
 	Count(context.Context) (int64, error)
 	GetByUsername(context.Context, string) (domain.Account, error)
 	Get(context.Context, int64) (domain.Account, error)
-	List(context.Context, ListQuery, accessdomain.AccountScope) ([]domain.Account, int64, error)
-	Export(context.Context, ListQuery, accessdomain.AccountScope, int) ([]domain.Account, error)
-	Options(context.Context, accessdomain.AccountScope) ([]domain.Account, error)
+	List(context.Context, ListQuery, AccountScope) ([]domain.Account, int64, error)
+	Export(context.Context, ListQuery, AccountScope, int) ([]domain.Account, error)
+	Options(context.Context, AccountScope) ([]domain.Account, error)
 	UsernameExists(context.Context, string, int64) (bool, error)
+	ExistingUsernames(context.Context, []string) (map[string]struct{}, error)
 	Save(context.Context, domain.Account, []int64, int64) error
 	Delete(context.Context, []int64, int64) error
 	SetStatus(context.Context, int64, int, int64) error
 	SetPassword(context.Context, int64, string, int64) error
 	SetProfile(context.Context, int64, ProfileCommand) error
-	Bootstrap(context.Context, domain.Account, string) (bool, error)
+	Bootstrap(context.Context, domain.Account) (bool, error)
 	IsRoot(context.Context, int64) (bool, error)
 	ImportReferences(context.Context) (ImportReferences, error)
 	Import(context.Context, []domain.Account, int64) error
 }
 
 type Sessions interface {
-	Create(context.Context, int64) (domain.TokenPair, error)
-	Refresh(context.Context, string) (domain.TokenPair, error)
+	Create(context.Context, int64) (TokenPair, error)
+	Refresh(context.Context, string) (TokenPair, error)
 	AccountID(context.Context, string) (int64, error)
 	RevokeAccess(context.Context, string) error
 	InvalidateUser(context.Context, int64) error
 }
 
 type Captchas interface {
-	Generate(context.Context) (domain.Captcha, error)
+	Generate(context.Context) (Captcha, error)
 	Verify(context.Context, string, string) (bool, error)
 }
 
@@ -117,8 +92,8 @@ type PasswordHasher interface {
 }
 
 type Authorizer interface {
-	Authorization(context.Context, int64) (accessdomain.Authorization, error)
-	Scope(context.Context, int64) (accessdomain.AccountScope, error)
+	Authorization(context.Context, int64) (Authorization, error)
+	Scope(context.Context, int64) (AccountScope, error)
 }
 
 type Service struct {
@@ -153,62 +128,62 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string) (boo
 		return false, apperror.Internal(err)
 	}
 	account := domain.Account{Username: strings.TrimSpace(username), Nickname: "超级管理员", Gender: 0, Password: hash, DepartmentID: 1, Status: 1}
-	created, err := s.repository.Bootstrap(ctx, account, accessdomain.RootRoleCode)
+	created, err := s.repository.Bootstrap(ctx, account)
 	if err != nil {
 		return false, mapConflict(err, "初始化用户名已存在")
 	}
 	return created, nil
 }
 
-func (s *Service) Captcha(ctx context.Context) (domain.Captcha, error) {
+func (s *Service) Captcha(ctx context.Context) (Captcha, error) {
 	captcha, err := s.captchas.Generate(ctx)
 	if err != nil {
-		return domain.Captcha{}, apperror.Internal(err)
+		return Captcha{}, apperror.Internal(err)
 	}
 	return captcha, nil
 }
 
-func (s *Service) Login(ctx context.Context, command LoginCommand) (domain.TokenPair, error) {
+func (s *Service) Login(ctx context.Context, command LoginCommand) (TokenPair, error) {
 	if strings.TrimSpace(command.Username) == "" || command.Password == "" || command.CaptchaID == "" || command.CaptchaCode == "" {
-		return domain.TokenPair{}, apperror.InvalidArgument(apperror.CodeInvalidArgument, "用户名、密码和验证码不能为空", nil)
+		return TokenPair{}, apperror.InvalidArgument(apperror.CodeInvalidArgument, "用户名、密码和验证码不能为空", nil)
 	}
 	valid, err := s.captchas.Verify(ctx, command.CaptchaID, command.CaptchaCode)
 	if err != nil {
-		return domain.TokenPair{}, apperror.Internal(err)
+		return TokenPair{}, apperror.Internal(err)
 	}
 	if !valid {
-		return domain.TokenPair{}, apperror.InvalidArgument(apperror.CodeInvalidArgument, "验证码错误或已过期", nil)
+		return TokenPair{}, apperror.InvalidArgument(apperror.CodeInvalidArgument, "验证码错误或已过期", nil)
 	}
 	account, err := s.repository.GetByUsername(ctx, strings.TrimSpace(command.Username))
 	if errors.Is(err, ErrNotFound) {
-		return domain.TokenPair{}, apperror.Unauthorized(apperror.CodeInvalidCredentials, "用户名或密码错误")
+		return TokenPair{}, apperror.Unauthorized(apperror.CodeInvalidCredentials, "用户名或密码错误")
 	}
 	if err != nil {
-		return domain.TokenPair{}, apperror.Internal(err)
+		return TokenPair{}, apperror.Internal(err)
 	}
 	if !s.passwords.Compare(account.Password, command.Password) {
-		return domain.TokenPair{}, apperror.Unauthorized(apperror.CodeInvalidCredentials, "用户名或密码错误")
+		return TokenPair{}, apperror.Unauthorized(apperror.CodeInvalidCredentials, "用户名或密码错误")
 	}
 	if account.Status != 1 {
-		return domain.TokenPair{}, apperror.Forbidden(apperror.CodeForbidden, "用户已被禁用")
+		return TokenPair{}, apperror.Forbidden(apperror.CodeForbidden, "用户已被禁用")
 	}
 	tokens, err := s.sessions.Create(ctx, account.ID)
 	if err != nil {
-		return domain.TokenPair{}, apperror.Internal(err)
+		return TokenPair{}, apperror.Internal(err)
 	}
 	return tokens, nil
 }
 
-func (s *Service) Refresh(ctx context.Context, refreshToken string) (domain.TokenPair, error) {
+func (s *Service) Refresh(ctx context.Context, refreshToken string) (TokenPair, error) {
 	if strings.TrimSpace(refreshToken) == "" {
-		return domain.TokenPair{}, apperror.InvalidArgument(apperror.CodeInvalidArgument, "刷新令牌不能为空", nil)
+		return TokenPair{}, apperror.InvalidArgument(apperror.CodeInvalidArgument, "刷新令牌不能为空", nil)
 	}
 	tokens, err := s.sessions.Refresh(ctx, refreshToken)
 	if err != nil {
 		if !errors.Is(err, ErrSessionNotFound) && !errors.Is(err, ErrRefreshTokenReused) {
-			return domain.TokenPair{}, apperror.Internal(err)
+			return TokenPair{}, apperror.Internal(err)
 		}
-		return domain.TokenPair{}, apperror.Unauthorized(apperror.CodeInvalidRefreshToken, "刷新令牌无效或已过期")
+		return TokenPair{}, apperror.Unauthorized(apperror.CodeInvalidRefreshToken, "刷新令牌无效或已过期")
 	}
 	return tokens, nil
 }
@@ -223,39 +198,39 @@ func (s *Service) Logout(ctx context.Context, accessToken string) error {
 	return nil
 }
 
-func (s *Service) VerifyAccount(ctx context.Context, accessToken string) (domain.Account, accessdomain.Authorization, error) {
+func (s *Service) VerifyAccount(ctx context.Context, accessToken string) (domain.Account, Authorization, error) {
 	accountID, err := s.sessions.AccountID(ctx, accessToken)
 	if err != nil {
 		if !errors.Is(err, ErrSessionNotFound) {
-			return domain.Account{}, accessdomain.Authorization{}, apperror.Internal(err)
+			return domain.Account{}, Authorization{}, apperror.Internal(err)
 		}
-		return domain.Account{}, accessdomain.Authorization{}, apperror.Unauthorized(apperror.CodeInvalidAccessToken, "访问令牌无效或已过期")
+		return domain.Account{}, Authorization{}, apperror.Unauthorized(apperror.CodeInvalidAccessToken, "访问令牌无效或已过期")
 	}
 	account, err := s.repository.Get(ctx, accountID)
 	if errors.Is(err, ErrNotFound) || (err == nil && account.Status != 1) {
 		_ = s.sessions.InvalidateUser(ctx, accountID)
-		return domain.Account{}, accessdomain.Authorization{}, apperror.Unauthorized(apperror.CodeInvalidAccessToken, "访问令牌无效或已过期")
+		return domain.Account{}, Authorization{}, apperror.Unauthorized(apperror.CodeInvalidAccessToken, "访问令牌无效或已过期")
 	}
 	if err != nil {
-		return domain.Account{}, accessdomain.Authorization{}, apperror.Internal(err)
+		return domain.Account{}, Authorization{}, apperror.Internal(err)
 	}
 	authorization, err := s.authorizer.Authorization(ctx, accountID)
 	if err != nil {
-		return domain.Account{}, accessdomain.Authorization{}, err
+		return domain.Account{}, Authorization{}, err
 	}
 	return account, authorization, nil
 }
 
-func (s *Service) Current(ctx context.Context, accountID int64) (domain.Current, error) {
+func (s *Service) Current(ctx context.Context, accountID int64) (CurrentUser, error) {
 	account, err := s.repository.Get(ctx, accountID)
 	if err != nil {
-		return domain.Current{}, mapError(err, "用户不存在")
+		return CurrentUser{}, mapError(err, "用户不存在")
 	}
 	authorization, err := s.authorizer.Authorization(ctx, accountID)
 	if err != nil {
-		return domain.Current{}, err
+		return CurrentUser{}, err
 	}
-	return domain.Current{UserID: account.ID, Username: account.Username, Nickname: account.Nickname, Avatar: account.Avatar, Roles: authorization.Roles, Permissions: authorization.Permissions}, nil
+	return CurrentUser{UserID: account.ID, Username: account.Username, Nickname: account.Nickname, Avatar: account.Avatar, Roles: authorization.Roles, Permissions: authorization.Permissions}, nil
 }
 
 func (s *Service) List(ctx context.Context, query ListQuery, viewerID int64) ([]domain.Account, int64, error) {
@@ -281,76 +256,6 @@ func (s *Service) Export(ctx context.Context, query ListQuery, viewerID int64) (
 		return nil, apperror.Internal(err)
 	}
 	return items, nil
-}
-
-func (s *Service) Import(ctx context.Context, candidates []ImportCandidate, actorID int64) (ImportResult, error) {
-	result := ImportResult{Messages: []string{}}
-	if len(candidates) == 0 || len(candidates) > 1000 {
-		return result, apperror.InvalidArgument(apperror.CodeInvalidArgument, "导入文件没有数据或超过1000行", nil)
-	}
-	if len(s.defaultPassword) < 8 {
-		return result, apperror.InvalidArgument(apperror.CodeInvalidArgument, "未配置新用户初始密码", nil)
-	}
-	references, err := s.repository.ImportReferences(ctx)
-	if err != nil {
-		return result, apperror.Internal(err)
-	}
-	password, err := s.passwords.Hash(s.defaultPassword)
-	if err != nil {
-		return result, apperror.Internal(err)
-	}
-	seen := make(map[string]struct{}, len(candidates))
-	valid := make([]domain.Account, 0, len(candidates))
-	for _, candidate := range candidates {
-		account, message := s.prepareImport(ctx, candidate, references, password, seen)
-		if message != "" {
-			result.InvalidCount++
-			result.Messages = append(result.Messages, message)
-			continue
-		}
-		seen[account.Username] = struct{}{}
-		valid = append(valid, account)
-	}
-	if len(valid) > 0 {
-		if err := s.repository.Import(ctx, valid, actorID); err != nil {
-			return result, mapConflict(err, "导入用户中存在重复用户名")
-		}
-	}
-	result.ValidCount = len(valid)
-	return result, nil
-}
-
-func (s *Service) prepareImport(ctx context.Context, candidate ImportCandidate, references ImportReferences, password string, seen map[string]struct{}) (domain.Account, string) {
-	prefix := "第" + strconv.Itoa(candidate.Row) + "行: "
-	if candidate.ParseError != "" {
-		return domain.Account{}, prefix + candidate.ParseError
-	}
-	account := domain.Account{Username: strings.TrimSpace(candidate.Username), Nickname: strings.TrimSpace(candidate.Nickname), Mobile: strings.TrimSpace(candidate.Mobile), Gender: candidate.Gender, Email: strings.TrimSpace(candidate.Email), Status: candidate.Status, Password: password}
-	for _, token := range candidate.RoleTokens {
-		if id, ok := references.Roles[strings.TrimSpace(token)]; ok {
-			account.RoleIDs = append(account.RoleIDs, id)
-		}
-	}
-	if candidate.Department != "" {
-		account.DepartmentID = references.Departments[strings.TrimSpace(candidate.Department)]
-		if account.DepartmentID == 0 {
-			return domain.Account{}, prefix + "部门不存在"
-		}
-	}
-	if err := account.Validate(); err != nil || len(account.RoleIDs) == 0 {
-		return domain.Account{}, prefix + "用户名、昵称、性别、状态或角色无效"
-	}
-	if _, duplicate := seen[account.Username]; duplicate {
-		return domain.Account{}, prefix + "用户名在文件内重复"
-	}
-	exists, err := s.repository.UsernameExists(ctx, account.Username, 0)
-	if err != nil {
-		return domain.Account{}, prefix + "用户名校验失败"
-	}
-	if exists {
-		return domain.Account{}, prefix + "用户名已存在"
-	}
-	return account, ""
 }
 
 func (s *Service) Options(ctx context.Context, viewerID int64) ([]domain.Account, error) {

@@ -11,29 +11,12 @@ server:
 logging:
   level: info
   format: text
-resilience:
-  http_rate_limit:
-    enabled: false
-    requests_per_second: 100
-    burst: 200
-    client_ttl: 10m
-  circuit_breaker:
-    failure_threshold: 5
-    open_timeout: 30s
-    half_open_max_requests: 1
 mysql:
-  dsn: root:mysql_12345@tcp(127.0.0.1:13306)/go_main?charset=utf8mb4&parseTime=true&loc=UTC
+  dsn: ""
   max_open_conns: 25
   max_idle_conns: 10
   conn_max_lifetime: 30m
   conn_max_idle_time: 5m
-redis:
-  address: 127.0.0.1:16379
-  password: redis_12345
-  database: 0
-  dial_timeout: 3s
-  read_timeout: 2s
-  write_timeout: 2s
 rocketmq:
   endpoints: 127.0.0.1:18081
   topic_prefix: go-service-main-local

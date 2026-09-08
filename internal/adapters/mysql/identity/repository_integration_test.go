@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	mysqladapter "github.com/yuhang1130/go-service-main/internal/adapters/mysql"
-	accessdomain "github.com/yuhang1130/go-service-main/internal/features/accesscontrol/domain"
 	identityapp "github.com/yuhang1130/go-service-main/internal/features/identity/application"
 	identitydomain "github.com/yuhang1130/go-service-main/internal/features/identity/domain"
 	"github.com/yuhang1130/go-service-main/internal/foundation/config"
@@ -52,6 +51,13 @@ func TestRepositoryRoundTripsAccountAndRoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	existing, err := repository.ExistingUsernames(ctx, []string{username, username, "missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := existing[username]; !found || len(existing) != 1 {
+		t.Fatalf("ExistingUsernames() = %v, want only %q", existing, username)
+	}
 	t.Cleanup(func() {
 		var ids []int64
 		database.GORM().Table("sys_user").Where("username = ?", username).Pluck("id", &ids)
@@ -68,7 +74,7 @@ func TestRepositoryRoundTripsAccountAndRoles(t *testing.T) {
 	if got.Username != username || len(got.RoleIDs) != 1 || got.RoleIDs[0] != 1 {
 		t.Fatalf("unexpected account: %#v", got)
 	}
-	items, total, err := repository.List(ctx, identityapp.ListQuery{Page: 1, PageSize: 10, Keywords: username}, accessdomain.AccountScope{All: true})
+	items, total, err := repository.List(ctx, identityapp.ListQuery{Page: 1, PageSize: 10, Keywords: username}, identityapp.AccountScope{All: true})
 	if err != nil {
 		t.Fatal(err)
 	}

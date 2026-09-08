@@ -60,7 +60,7 @@ func wireAdministrationAPI(ctx context.Context, database *gorm.DB, redis *redisc
 		return administrationAPI{}, fmt.Errorf("subscribe SSE event bus: %w", err)
 	}
 	auditQueue := middleware.NewAsyncAuditRecorder(auditService, logger, 256, 2*time.Second)
-	configurationService := configurationapp.NewService(configurationmysql.NewRepository(database), configurationredis.NewCache(redis))
+	configurationService := configurationapp.NewService(configurationmysql.NewRepository(database), configurationredis.NewCache(redis, logger))
 	return administrationAPI{
 		audit:         auditQueue,
 		auditQueue:    auditQueue,

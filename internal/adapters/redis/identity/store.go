@@ -13,7 +13,6 @@ import (
 
 	redisclient "github.com/redis/go-redis/v9"
 	identityapp "github.com/yuhang1130/go-service-main/internal/features/identity/application"
-	"github.com/yuhang1130/go-service-main/internal/features/identity/domain"
 	"github.com/yuhang1130/go-service-main/internal/foundation/config"
 )
 
@@ -126,26 +125,26 @@ func (s *Store) AllowLogin(ctx context.Context, clientID string) (time.Duration,
 	return time.Duration(retryAfterMillis) * time.Millisecond, nil
 }
 
-func (s *Store) Create(ctx context.Context, accountID int64) (domain.TokenPair, error) {
+func (s *Store) Create(ctx context.Context, accountID int64) (identityapp.TokenPair, error) {
 	familyID, err := randomToken()
 	if err != nil {
-		return domain.TokenPair{}, err
+		return identityapp.TokenPair{}, err
 	}
 	return s.createFamily(ctx, accountID, familyID)
 }
 
-func (s *Store) createFamily(ctx context.Context, accountID int64, familyID string) (domain.TokenPair, error) {
+func (s *Store) createFamily(ctx context.Context, accountID int64, familyID string) (identityapp.TokenPair, error) {
 	accessToken, err := randomToken()
 	if err != nil {
-		return domain.TokenPair{}, err
+		return identityapp.TokenPair{}, err
 	}
 	refreshToken, err := randomToken()
 	if err != nil {
-		return domain.TokenPair{}, err
+		return identityapp.TokenPair{}, err
 	}
 	value, err := json.Marshal(session{AccountID: accountID, FamilyID: familyID})
 	if err != nil {
-		return domain.TokenPair{}, err
+		return identityapp.TokenPair{}, err
 	}
 	familyKey := sessionFamilyKey(familyID)
 	_, err = s.client.TxPipelined(ctx, func(pipe redisclient.Pipeliner) error {
@@ -159,38 +158,38 @@ func (s *Store) createFamily(ctx context.Context, accountID int64, familyID stri
 		return nil
 	})
 	if err != nil {
-		return domain.TokenPair{}, err
+		return identityapp.TokenPair{}, err
 	}
-	return domain.TokenPair{AccessToken: accessToken, RefreshToken: refreshToken, TokenType: "Bearer", ExpiresIn: int64(s.accessTTL.Seconds())}, nil
+	return identityapp.TokenPair{AccessToken: accessToken, RefreshToken: refreshToken, TokenType: "Bearer", ExpiresIn: int64(s.accessTTL.Seconds())}, nil
 }
 
-func (s *Store) Refresh(ctx context.Context, token string) (domain.TokenPair, error) {
+func (s *Store) Refresh(ctx context.Context, token string) (identityapp.TokenPair, error) {
 	oldRefreshKey := refreshKey(token)
 	value, err := s.client.Get(ctx, oldRefreshKey).Bytes()
 	if errors.Is(err, redisclient.Nil) {
-		return domain.TokenPair{}, ErrSessionNotFound
+		return identityapp.TokenPair{}, ErrSessionNotFound
 	}
 	if err != nil {
-		return domain.TokenPair{}, err
+		return identityapp.TokenPair{}, err
 	}
 	var current session
 	if err := json.Unmarshal(value, &current); err != nil {
-		return domain.TokenPair{}, err
+		return identityapp.TokenPair{}, err
 	}
 	if current.Used {
-		return domain.TokenPair{}, s.rejectReusedRefresh(ctx, current)
+		return identityapp.TokenPair{}, s.rejectReusedRefresh(ctx, current)
 	}
 	tombstone, err := json.Marshal(session{AccountID: current.AccountID, FamilyID: current.FamilyID, Used: true})
 	if err != nil {
-		return domain.TokenPair{}, err
+		return identityapp.TokenPair{}, err
 	}
 	accessToken, err := randomToken()
 	if err != nil {
-		return domain.TokenPair{}, err
+		return identityapp.TokenPair{}, err
 	}
 	refreshToken, err := randomToken()
 	if err != nil {
-		return domain.TokenPair{}, err
+		return identityapp.TokenPair{}, err
 	}
 	familyKey := sessionFamilyKey(current.FamilyID)
 	rotated, err := rotateSessionScript.Run(ctx, s.client, []string{
@@ -204,24 +203,24 @@ func (s *Store) Refresh(ctx context.Context, token string) (domain.TokenPair, er
 		accessKey(""), current.FamilyID, string(tombstone),
 	).Int()
 	if err != nil {
-		return domain.TokenPair{}, err
+		return identityapp.TokenPair{}, err
 	}
 	if rotated != 1 {
 		latest, getErr := s.client.Get(ctx, oldRefreshKey).Bytes()
 		if getErr == nil {
 			var observed session
 			if unmarshalErr := json.Unmarshal(latest, &observed); unmarshalErr != nil {
-				return domain.TokenPair{}, unmarshalErr
+				return identityapp.TokenPair{}, unmarshalErr
 			}
 			if observed.Used {
-				return domain.TokenPair{}, s.rejectReusedRefresh(ctx, observed)
+				return identityapp.TokenPair{}, s.rejectReusedRefresh(ctx, observed)
 			}
 		} else if !errors.Is(getErr, redisclient.Nil) {
-			return domain.TokenPair{}, getErr
+			return identityapp.TokenPair{}, getErr
 		}
-		return domain.TokenPair{}, ErrSessionNotFound
+		return identityapp.TokenPair{}, ErrSessionNotFound
 	}
-	return domain.TokenPair{AccessToken: accessToken, RefreshToken: refreshToken, TokenType: "Bearer", ExpiresIn: int64(s.accessTTL.Seconds())}, nil
+	return identityapp.TokenPair{AccessToken: accessToken, RefreshToken: refreshToken, TokenType: "Bearer", ExpiresIn: int64(s.accessTTL.Seconds())}, nil
 }
 
 func (s *Store) AccountID(ctx context.Context, token string) (int64, error) {
@@ -274,20 +273,20 @@ func (s *Store) rejectReusedRefresh(ctx context.Context, current session) error 
 	return ErrRefreshTokenReused
 }
 
-func (s *Store) Generate(ctx context.Context) (domain.Captcha, error) {
+func (s *Store) Generate(ctx context.Context) (identityapp.Captcha, error) {
 	id, err := randomToken()
 	if err != nil {
-		return domain.Captcha{}, err
+		return identityapp.Captcha{}, err
 	}
 	code, err := randomDigits(4)
 	if err != nil {
-		return domain.Captcha{}, err
+		return identityapp.Captcha{}, err
 	}
 	if err := s.client.Set(ctx, captchaKey(id), strings.ToLower(code), s.captchaTTL).Err(); err != nil {
-		return domain.Captcha{}, err
+		return identityapp.Captcha{}, err
 	}
 	svg := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="140" height="44" viewBox="0 0 140 44"><rect width="140" height="44" rx="6" fill="#f0f8ff"/><text x="70" y="31" text-anchor="middle" font-family="monospace" font-size="28" font-weight="700" letter-spacing="8" fill="#2563eb">%s</text></svg>`, code)
-	return domain.Captcha{ID: id, Image: "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(svg))}, nil
+	return identityapp.Captcha{ID: id, Image: "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(svg))}, nil
 }
 
 func (s *Store) Verify(ctx context.Context, id, code string) (bool, error) {

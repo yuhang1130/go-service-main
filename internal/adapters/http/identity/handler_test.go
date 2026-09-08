@@ -3,6 +3,7 @@ package identity
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,18 +11,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 	identityapp "github.com/yuhang1130/go-service-main/internal/features/identity/application"
-	identitydomain "github.com/yuhang1130/go-service-main/internal/features/identity/domain"
 	"github.com/yuhang1130/go-service-main/internal/foundation/auth"
 )
 
 type handlerSessionsStub struct {
 	identityapp.Sessions
 	refreshToken string
-	tokens       identitydomain.TokenPair
+	tokens       identityapp.TokenPair
 	invalidated  int64
 }
 
-func (s *handlerSessionsStub) Refresh(_ context.Context, token string) (identitydomain.TokenPair, error) {
+func (s *handlerSessionsStub) Refresh(_ context.Context, token string) (identityapp.TokenPair, error) {
 	s.refreshToken = token
 	return s.tokens, nil
 }
@@ -62,7 +62,7 @@ func (l *handlerLoginLimiterStub) AllowLogin(_ context.Context, clientID string)
 }
 
 func TestRefreshReadsSensitiveTokenFromJSONBody(t *testing.T) {
-	sessions := &handlerSessionsStub{tokens: identitydomain.TokenPair{AccessToken: "access", RefreshToken: "refresh", TokenType: "Bearer", ExpiresIn: 60}}
+	sessions := &handlerSessionsStub{tokens: identityapp.TokenPair{AccessToken: "access", RefreshToken: "refresh", TokenType: "Bearer", ExpiresIn: 60}}
 	handler := NewHandler(identityapp.NewService(nil, sessions, nil, nil, nil, ""), nil)
 	router := gin.New()
 	router.POST("/refresh", handler.refresh)
@@ -77,6 +77,18 @@ func TestRefreshReadsSensitiveTokenFromJSONBody(t *testing.T) {
 	}
 	if sessions.refreshToken != "sensitive-refresh-token" {
 		t.Fatalf("refresh token = %q, want JSON body value", sessions.refreshToken)
+	}
+	var response struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Data["accessToken"] != "access" || response.Data["refreshToken"] != "refresh" || response.Data["tokenType"] != "Bearer" {
+		t.Fatalf("token response = %#v", response.Data)
+	}
+	if _, leaked := response.Data["AccessToken"]; leaked {
+		t.Fatalf("application field name leaked into HTTP response: %#v", response.Data)
 	}
 
 	recorder = httptest.NewRecorder()

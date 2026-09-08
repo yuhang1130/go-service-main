@@ -24,3 +24,10 @@ func registerEventHandlers(registry *eventing.Registry, database *gorm.DB, consu
 	}
 	return nil
 }
+
+func requireEventHandlers(registry *eventing.Registry) error {
+	if registry.Count() == 0 {
+		return fmt.Errorf("consumer has no registered event handlers")
+	}
+	return nil
+}

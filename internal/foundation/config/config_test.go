@@ -117,6 +117,10 @@ func TestRepositoryRoleConfigsValidate(t *testing.T) {
 	for _, role := range []string{"api", "job", "consumer"} {
 		role := role
 		t.Run(role, func(t *testing.T) {
+			t.Setenv("APP_MYSQL_DSN", "app:app@tcp(localhost:3306)/app?parseTime=true&loc=UTC")
+			if role == "api" {
+				t.Setenv("APP_REDIS_ADDRESS", "localhost:6379")
+			}
 			cfg := Defaults()
 			path := filepath.Join("..", "..", "..", "configs", role+".yaml")
 			if err := Load(path, role, &cfg); err != nil {

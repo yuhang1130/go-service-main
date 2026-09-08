@@ -52,3 +52,8 @@ A Feature may be used by several Roles, but each Role constructs its own depende
 Long operations are persisted and delivered through Transactional Outbox. Consumer database changes and Inbox final state commit in one transaction; external side effects do not occur inside that transaction. Cron callbacks remain short, bounded, and idempotent.
 
 Business Features that publish events commit business state and an Outbox event atomically. The Job Role relays those events outside the transaction, and the Consumer commits database changes together with the corresponding Inbox final state.
+
+The repository currently provides the event-delivery foundation but does not
+register a concrete business Consumer handler. A Consumer with no handlers
+fails startup instead of reporting a misleading ready state. Add an explicit
+Feature registration before deploying that Role.
