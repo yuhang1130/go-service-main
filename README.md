@@ -1,6 +1,6 @@
 # go-service-main
 
-一个可以直接承载业务代码的 Go 服务工程模板。仓库使用单个 `go.mod`，同时提供 API、Job、Consumer 三个可独立编译和部署的 Role，并共享配置、日志、数据库、缓存、消息和健康检查等基础设施。
+一个可以直接承载业务代码的 Go 服务工程模板。仓库使用单个 `go.mod`，提供 API、Job 和四个任务 Consumer 等可独立编译、部署的 Role，并共享配置、日志、数据库、缓存、任务分发和健康检查等基础设施。
 
 这不是代码生成器。创建业务仓库后，直接在 `internal/features` 下增加 Feature，并在对应的 `internal/bootstrap` 组合根中完成显式装配。
 
@@ -11,7 +11,10 @@
 ├── cmd/
 │   ├── api/                    # HTTP API 进程入口
 │   ├── job/                    # 定时扫描、发现和补偿进程入口
-│   └── consumer/               # RocketMQ 消费进程入口
+│   ├── collection-consumer/    # 素材采集任务进程入口
+│   ├── transformation-consumer/ # 素材裂变任务进程入口
+│   ├── upload-consumer/        # 渠道上传任务进程入口
+│   └── infrastructure-consumer/ # 渠道基建任务进程入口
 ├── internal/
 │   ├── bootstrap/              # 各 Role 的依赖装配和生命周期
 │   ├── features/               # 业务领域规则和应用用例
@@ -31,14 +34,14 @@ cmd -> bootstrap -> adapters -> application -> domain
                          \-> foundation
 ```
 
-`domain` 和 `application` 不依赖 Gin、GORM、Redis、RocketMQ 等基础设施 SDK。不同 Role 可以复用同一个 Feature，但不会因此共享进程生命周期。
+`domain` 和 `application` 不依赖 Gin、GORM、Redis 等基础设施 SDK。不同 Role 可以复用同一个 Feature，但不会因此共享进程生命周期。
 
-各 Role 在 `internal/bootstrap` 中显式声明服务依赖图。无依赖的节点并行启动，启动失败会回滚已启动节点，关闭时按依赖层级逆序执行；生命周期节点的探活自动接入 `/readyz`。API 另有按直连客户端 IP 的令牌桶限流，Job 的 Outbox RocketMQ 发布带熔断保护。详细边界见 [架构说明](docs/architecture.md)。
+各 Role 在 `internal/bootstrap` 中显式声明服务依赖图。无依赖的节点并行启动，启动失败会回滚已启动节点，关闭时按依赖层级逆序执行；生命周期节点的探活自动接入 `/readyz`。API 另有按直连客户端 IP 的令牌桶限流，Job 的 Outbox Redis Stream 发布带熔断保护。详细边界见 [架构说明](docs/architecture.md)。
 
 ## 环境要求
 
 - Go 1.26+
-- Docker 与 Docker Compose（本地 MySQL、Redis、RocketMQ）
+- Docker 与 Docker Compose（本地 MySQL、Redis）
 - MySQL 命令行客户端或数据库管理平台（人工执行 SQL）
 
 ## 快速开始
@@ -61,7 +64,7 @@ make dev-api
 
 测试文件和数据库 SQL 不触发自动重启；建表和结构变更由操作人员审核后逐个执行，应用不会自动修改数据库结构。
 
-`make dev-up` 会创建本地 RocketMQ Topic。API 启动后可通过验证码接口确认业务服务正常响应：
+`make dev-up` 会启动本地 MySQL 和 Redis。Redis Stream 及 Consumer Group 由对应 Consumer 启动时创建。API 启动后可通过验证码接口确认业务服务正常响应：
 
 ```bash
 curl -i http://127.0.0.1:8080/api/v1/auth/captcha
@@ -78,16 +81,22 @@ API 登录后会建立 `/api/v1/sse/connect` 长连接。字典新增、修改�
 - 业务 API：`http://127.0.0.1:8080`
 - API 健康检查：`http://127.0.0.1:9090/readyz`
 - Job 健康检查：`http://127.0.0.1:9091/readyz`
-- Consumer 健康检查：`http://127.0.0.1:9092/readyz`
+- 素材采集 Consumer：`http://127.0.0.1:9092/readyz`
+- 素材裂变 Consumer：`http://127.0.0.1:9093/readyz`
+- 渠道上传 Consumer：`http://127.0.0.1:9094/readyz`
+- 渠道基建 Consumer：`http://127.0.0.1:9095/readyz`
 
-业务模块注册事件生产和处理逻辑后，可分别启动 Job 和 Consumer 完成 Outbox 投递及 Inbox 防重消费：
+业务模块注册任务创建和处理逻辑后，可启动 Job 及对应 Consumer。任务和 `task_dispatch_outbox` 在一个 MySQL 事务中提交；Redis Stream 负责低延迟分发，MySQL 条件领取负责防止重复执行：
 
 ```bash
 make run-job
-make run-consumer
+make run-collection-consumer
+make run-transformation-consumer
+make run-upload-consumer
+make run-infrastructure-consumer
 ```
 
-Consumer 没有注册业务事件处理器时会以 idle 模式启动，仅暴露 management 健康检查且不连接 RocketMQ；注册至少一个事件处理器后才会创建订阅，避免空 Consumer 确认并丢弃未知消息。
+Consumer 没有注册业务任务 Handler 时会启动失败，避免空 Consumer 确认并丢弃未知任务。
 
 ## 开始写业务
 
@@ -104,25 +113,28 @@ internal/features/order/
 ```text
 internal/adapters/http/order/          # API DTO、参数校验和响应映射
 internal/adapters/mysql/order/         # GORM 持久化模型和 Repository 实现
-internal/adapters/messaging/order/     # 事件发布或消费协议映射
+internal/adapters/messaging/order/     # 任务分发协议映射
 ```
 
 最后只在需要该业务的 Role 中装配。按 Feature 使用独立装配文件，避免把具体业务依赖堆进 Role 生命周期文件：
 
 - API 用例：`internal/bootstrap/api_<feature>.go`
 - 定时发现或补偿任务：`internal/bootstrap/job_<feature>.go`
-- 事件处理器：`internal/bootstrap/consumer_<feature>.go`，并加入 `consumer_handlers.go` 的统一注册表
+- 任务处理器：按所属 Role 放入 `internal/bootstrap/<role>_<feature>.go`，并显式加入该 Role 的注册表
 
 完整规则和检查清单见 [业务开发指南](docs/business-development.md)。
 
 ## 独立构建与部署
 
-分别构建三个二进制：
+构建全部 Role 二进制：
 
 ```bash
 make build-api
 make build-job
-make build-consumer
+make build-collection-consumer
+make build-transformation-consumer
+make build-upload-consumer
+make build-infrastructure-consumer
 ```
 
 通用 Dockerfile 通过 `SERVICE` 参数选择入口：
@@ -130,15 +142,15 @@ make build-consumer
 ```bash
 docker build -f deployments/docker/Dockerfile --build-arg SERVICE=api -t go-service-main-api:dev .
 docker build -f deployments/docker/Dockerfile --build-arg SERVICE=job -t go-service-main-job:dev .
-docker build -f deployments/docker/Dockerfile --build-arg SERVICE=consumer -t go-service-main-consumer:dev .
+docker build -f deployments/docker/Dockerfile --build-arg SERVICE=collection-consumer -t go-service-main-collection-consumer:dev .
 ```
 
-三个镜像必须分别配置、发布和扩缩容。数据库变更 SQL 由操作人员在部署前独立执行，不会在任一 Role 启动时自动执行。
+各镜像必须分别配置、发布和扩缩容。数据库变更 SQL 由操作人员在部署前独立执行，不会在任一 Role 启动时自动执行。
 镜像内置 `/configs` 下的非敏感 Role YAML，运行时环境变量具有更高优先级；不要把真实密码或生产地址写入这些文件。
 
 ## 配置
 
-配置优先级为：代码默认值 → Role YAML → `APP_*` 环境变量。每个 Role 只校验和初始化自己实际使用的 Capability：三个 Role 都需要 MySQL，API 的本地身份会话需要 Redis，Job 和 Consumer 需要 RocketMQ。
+配置优先级为：代码默认值 → Role YAML → `APP_*` 环境变量。每个 Role 只校验和初始化自己实际使用的 Capability：所有 Role 都需要 MySQL，API 的本地身份会话需要 Redis，Job 和四个 Consumer 使用 Redis Streams。
 
 - `APP_CONFIG_FILE`：指定配置文件
 - `APP_MYSQL_DSN`：应用使用的 GORM DSN
@@ -151,7 +163,9 @@ docker build -f deployments/docker/Dockerfile --build-arg SERVICE=consumer -t go
 - `APP_FILE_STORAGE_MAX_FILE_BYTES`：单文件大小上限，不能超过 `APP_SERVER_MAX_BODY_BYTES`
 - `APP_FILE_STORAGE_S3_*`：S3 兼容存储端点、区域、Bucket 和凭据；凭据留空时使用 AWS 默认凭据链
 - `APP_FILE_STORAGE_ALIYUN_OSS_*`：阿里云 OSS 端点、Bucket 和凭据
-- `APP_ROCKETMQ_ENDPOINTS`：RocketMQ Proxy gRPC 地址
+- `APP_TASK_DISPATCH_STREAM_PREFIX`：Redis Stream 的服务级前缀
+- `APP_TASK_DISPATCH_STREAM`、`APP_TASK_DISPATCH_CONSUMER_GROUP`：Consumer 固定订阅的逻辑 Stream 和消费者组
+- `APP_TASK_DISPATCH_CONCURRENCY`：当前 Consumer Role 的并发 Worker 数
 
 真实密码、Token、AccessKey 和生产地址只能通过环境变量或部署平台 Secret 注入。人工执行 SQL 时使用独立的受限数据库账号，不复用应用账号或在命令历史中写入密码。
 
@@ -163,7 +177,7 @@ docker build -f deployments/docker/Dockerfile --build-arg SERVICE=consumer -t go
 make ci
 ```
 
-该命令执行格式检查、版本化 SQL 配对检查、`go vet`、Staticcheck、单元测试、可用集成测试、OpenAPI 检查和三个 Role 的构建。需要真实依赖的完整集成测试应先启动本地基础设施，并按运行手册人工执行所需 SQL：
+该命令执行格式检查、版本化 SQL 配对检查、`go vet`、Staticcheck、单元测试、可用集成测试、OpenAPI 检查和全部 Role 的构建。需要真实依赖的完整集成测试应先启动本地基础设施，并按运行手册人工执行所需 SQL：
 
 ```bash
 make dev-up
@@ -173,7 +187,7 @@ make test-integration
 
 ## 从模板创建新业务仓库
 
-复制本仓库后，需要将 `github.com/yuhang1130/go-service-main` 全局替换为新仓库的 Go module path，并同步修改服务名、Compose 顶层 `name`、配置中的 Topic 前缀和 Consumer Group。完成后执行：
+复制本仓库后，需要将 `github.com/yuhang1130/go-service-main` 全局替换为新仓库的 Go module path，并同步修改服务名、Compose 顶层 `name`、Stream 前缀和 Consumer Group。完成后执行：
 
 ```bash
 go mod tidy

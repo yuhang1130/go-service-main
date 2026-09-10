@@ -1,6 +1,6 @@
 # Architecture
 
-This Service Repository is one Go module with three separately compiled Roles: API, Job, and Consumer. Each `cmd/<role>` delegates to an explicit composition root in `internal/bootstrap`; there is no runtime role flag or dependency-injection container.
+This Service Repository is one Go module with separately compiled API, Job, collection Consumer, transformation Consumer, upload Consumer, and infrastructure Consumer Roles. Each `cmd/<role>` delegates to an explicit composition root in `internal/bootstrap`; there is no runtime role flag or dependency-injection container.
 
 ## Dependency direction
 
@@ -27,9 +27,10 @@ There is no global service registry or runtime package scanning. The current Rol
 API:      mysql     redis
 
 Job:      mysql ------\
-          rocketmq -----> scheduler
+          redis --------> task-dispatch -> scheduler
 
-Consumer: mysql -> rocketmq
+Each Consumer: mysql ----\
+               redis -----> task-dispatch
 ```
 
 If one layer fails, services already started in that layer and all preceding layers are rolled back. On process cancellation, readiness is cleared before HTTP draining completes; external clients are closed only after the management/application servers have stopped accepting work.
@@ -39,21 +40,22 @@ Every lifecycle service contributes a readiness check. `/readyz` snapshots and r
 ## Resilience
 
 - The API installs a per-client in-memory token-bucket limiter in the HTTP adapter. It returns HTTP 429, stable code `TOO_MANY_REQUESTS`, and `Retry-After`; the existing Redis-backed username/IP login limiter remains a separate identity control.
-- The Job RocketMQ producer wraps Outbox publication with a closed/open/half-open circuit breaker. An open producer makes Job readiness fail, while the durable Outbox retry path retains the event for a later attempt.
+- The Job Redis Stream producer wraps Outbox publication with a closed/open/half-open circuit breaker. An open producer makes Job readiness fail, while the durable Outbox retry path retains the dispatch for a later attempt.
 
 ## Role boundaries
 
 - API accepts synchronous requests and maps protocol DTOs to application commands and queries.
 - Job discovers durable work, performs bounded scheduled maintenance, and compensates recoverable failures.
-- Consumer executes event-triggered work under at-least-once delivery semantics.
+- Each Consumer executes one category of task under at-least-once delivery semantics.
 
 A Feature may be used by several Roles, but each Role constructs its own dependencies and can be built, deployed, scaled, stopped, or rolled back without starting another Role.
 
-Long operations are persisted and delivered through Transactional Outbox. Consumer database changes and Inbox final state commit in one transaction; external side effects do not occur inside that transaction. Cron callbacks remain short, bounded, and idempotent.
+Long operations are persisted as business Tasks and signalled through a Transactional Outbox. Redis Streams provide low-latency wake-up but are not the source of truth. Cron callbacks remain short, bounded, and idempotent.
 
-Business Features that publish events commit business state and an Outbox event atomically. The Job Role relays those events outside the transaction, and the Consumer commits database changes together with the corresponding Inbox final state.
+Business Features commit a Task and `task_dispatch_outbox` row atomically, then attempt `XADD` after commit. The Job Role retries unpublished rows. A Consumer first conditionally claims the Task in MySQL, acknowledges the Stream entry, and then performs long-running or external work outside the claim transaction. Duplicate Stream entries are harmless because only one conditional claim may acquire execution ownership.
 
-The repository currently provides the event-delivery foundation but does not
-register a concrete business Consumer handler. A Consumer with no handlers
-fails startup instead of reporting a misleading ready state. Add an explicit
-Feature registration before deploying that Role.
+Collection, transformation, upload, and infrastructure use separate Streams,
+Consumer Groups, binaries, and concurrency settings. The repository currently
+provides the dispatch foundation but does not register concrete business Task
+handlers. A Consumer with no handlers fails startup instead of reporting a
+misleading ready state.

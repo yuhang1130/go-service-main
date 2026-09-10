@@ -17,12 +17,42 @@ A bounded business capability containing its domain rules and application use ca
 _Avoid_: Technical module, controller package
 
 **Capability**:
-A reusable technical integration available to a Role, such as MySQL, Redis, RocketMQ, or upstream authentication.
+A reusable technical integration available to a Role, such as MySQL, Redis, object storage, or upstream authentication.
 _Avoid_: Feature, plugin
 
 **Adapter**:
 Infrastructure code that connects a Role or Feature to an external protocol, scheduler, message broker, or data store.
 _Avoid_: Utility, business service
+
+## Media delivery workflow
+
+**Material Collection Task**:
+A unit of work that acquires original media for one identified drama from a drama platform.
+_Avoid_: Download message, collection event
+
+**Material Transformation Task**:
+A unit of work that produces one defined media variant from an acquired original material.
+_Avoid_: FFmpeg job, material mutation
+
+**Channel Upload Task**:
+A unit of work that submits one transformed material to a specified channel destination and tracks its confirmed availability there.
+_Avoid_: Upload message, file copy
+
+**Channel Infrastructure Task**:
+A unit of work that creates channel-side delivery infrastructure from a frozen set of confirmed uploaded materials.
+_Avoid_: Upload task, infrastructure message
+
+**Task Input Snapshot**:
+The immutable business inputs captured when a media-delivery Task is created; later configuration changes apply only to newly created Tasks.
+_Avoid_: Live configuration, mutable task parameters
+
+**Submitted Task**:
+A Channel Upload Task or Channel Infrastructure Task that the channel has accepted but whose intended external result has not yet been confirmed.
+_Avoid_: Successful task, completed task
+
+**Unknown Task Outcome**:
+A Channel Upload Task or Channel Infrastructure Task whose external result cannot be determined after an ambiguous response or timeout.
+_Avoid_: Failed task, retryable task
 
 ## Identity and access
 

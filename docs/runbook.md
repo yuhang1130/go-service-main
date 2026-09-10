@@ -12,15 +12,15 @@ For local initialization against an empty identity schema, run `make init-admin`
 
 ## Shutdown
 
-The service marks readiness false, stops accepting new work, drains in-flight work until the configured deadline, and then closes external clients. A Consumer must not acknowledge unfinished work.
+The service marks readiness false, stops accepting new work, cancels blocking Stream reads, and waits for handlers until the configured shutdown deadline. A Consumer acknowledges only after MySQL grants execution ownership; work acknowledged but interrupted after that point must be recovered through the Task lease.
 
 ## Health
 
 - `/livez` checks only that the process is alive.
-- `/readyz` concurrently checks every initialized lifecycle dependency required by the Role under a bounded deadline. Job and Consumer include their RocketMQ client lifecycle; a Job publish failure marks its producer unavailable, and an open publisher circuit breaker keeps readiness false until a later half-open publish succeeds.
+- `/readyz` concurrently checks every initialized lifecycle dependency required by the Role under a bounded deadline. Job and task Consumers check Redis. A Job publish failure marks its Redis Stream producer unavailable, and an open publisher circuit breaker keeps readiness false until a later half-open publish succeeds.
 - `/buildinfo` reports version, commit, build time, and Go version without configuration values.
 
-The readiness response names only the failed dependency (`mysql`, `redis`, `rocketmq`, or `scheduler`) and does not expose its connection error. Inspect stdout logs and dependency-specific monitoring for the root cause.
+The readiness response names only the failed dependency (`mysql`, `redis`, `task-dispatch`, or `scheduler`) and does not expose its connection error. Inspect stdout logs and dependency-specific monitoring for the root cause.
 
 ## Manual database changes
 

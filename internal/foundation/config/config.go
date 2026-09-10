@@ -71,17 +71,17 @@ type AliyunOSSStorage struct {
 	AccessKey string `koanf:"access_key"`
 	SecretKey string `koanf:"secret_key"`
 }
-type RocketMQ struct {
-	Endpoints      string        `koanf:"endpoints"`
-	AccessKey      string        `koanf:"access_key"`
-	SecretKey      string        `koanf:"secret_key"`
-	TopicPrefix    string        `koanf:"topic_prefix"`
-	ConsumerGroup  string        `koanf:"consumer_group"`
-	AwaitDuration  time.Duration `koanf:"await_duration"`
-	HandlerTimeout time.Duration `koanf:"handler_timeout"`
-	Topics         []string      `koanf:"topics"`
-	Concurrency    int32         `koanf:"concurrency"`
-	MaxBodyBytes   int           `koanf:"max_body_bytes"`
+type TaskDispatch struct {
+	StreamPrefix    string        `koanf:"stream_prefix"`
+	Stream          string        `koanf:"stream"`
+	ConsumerGroup   string        `koanf:"consumer_group"`
+	ConsumerName    string        `koanf:"consumer_name"`
+	ReadBlock       time.Duration `koanf:"read_block"`
+	HandlerTimeout  time.Duration `koanf:"handler_timeout"`
+	ReclaimInterval time.Duration `koanf:"reclaim_interval"`
+	ClaimMinIdle    time.Duration `koanf:"claim_min_idle"`
+	Concurrency     int           `koanf:"concurrency"`
+	MaxMessageBytes int           `koanf:"max_message_bytes"`
 }
 
 type HTTPRateLimit struct {
@@ -103,15 +103,15 @@ type Resilience struct {
 }
 
 type Role struct {
-	Environment string         `koanf:"environment"`
-	Server      Server         `koanf:"server"`
-	Logging     logging.Config `koanf:"logging"`
-	MySQL       MySQL          `koanf:"mysql"`
-	Redis       Redis          `koanf:"redis"`
-	Identity    Identity       `koanf:"identity"`
-	FileStorage FileStorage    `koanf:"file_storage"`
-	RocketMQ    RocketMQ       `koanf:"rocketmq"`
-	Resilience  Resilience     `koanf:"resilience"`
+	Environment  string         `koanf:"environment"`
+	Server       Server         `koanf:"server"`
+	Logging      logging.Config `koanf:"logging"`
+	MySQL        MySQL          `koanf:"mysql"`
+	Redis        Redis          `koanf:"redis"`
+	Identity     Identity       `koanf:"identity"`
+	FileStorage  FileStorage    `koanf:"file_storage"`
+	TaskDispatch TaskDispatch   `koanf:"task_dispatch"`
+	Resilience   Resilience     `koanf:"resilience"`
 }
 
 func Defaults() Role {
@@ -131,7 +131,11 @@ func Defaults() Role {
 			LoginRateLimit: 10, LoginRateWindow: time.Minute,
 		},
 		FileStorage: FileStorage{Type: "local", Root: ".tmp/uploads", MaxFileBytes: 2 << 20, S3: S3Storage{Region: "us-east-1", UsePathStyle: true}},
-		RocketMQ:    RocketMQ{HandlerTimeout: 30 * time.Second},
+		TaskDispatch: TaskDispatch{
+			StreamPrefix: "go-service-main", ReadBlock: 5 * time.Second,
+			HandlerTimeout: 2 * time.Hour, ReclaimInterval: 30 * time.Second,
+			ClaimMinIdle: time.Minute, Concurrency: 1, MaxMessageBytes: 4096,
+		},
 		Resilience: Resilience{
 			HTTPRateLimit: HTTPRateLimit{RequestsPerSecond: 100, Burst: 200, ClientTTL: 10 * time.Minute},
 			CircuitBreaker: CircuitBreaker{
@@ -159,24 +163,11 @@ func Load(path, role string, target *Role) error {
 	if err := loader.UnmarshalWithConf("", target, koanf.UnmarshalConf{Tag: "koanf"}); err != nil {
 		return fmt.Errorf("decode config: %w", err)
 	}
-	target.RocketMQ.Topics = normalizeList(target.RocketMQ.Topics)
 	return target.Validate(role)
 }
 
-func normalizeList(values []string) []string {
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		for item := range strings.SplitSeq(value, ",") {
-			if item = strings.TrimSpace(item); item != "" {
-				result = append(result, item)
-			}
-		}
-	}
-	return result
-}
-
 func (c Role) Validate(role string) error {
-	if role != "api" && role != "job" && role != "consumer" {
+	if role != "api" && role != "job" && !isTaskConsumerRole(role) {
 		return fmt.Errorf("unknown role %q", role)
 	}
 	if role == "api" && c.Server.HTTPPort <= 0 {
@@ -244,23 +235,35 @@ func (c Role) Validate(role string) error {
 	if strings.TrimSpace(c.MySQL.DSN) == "" {
 		return fmt.Errorf("mysql.dsn is required")
 	}
-	if role == "job" || role == "consumer" {
-		if strings.TrimSpace(c.RocketMQ.Endpoints) == "" {
-			return fmt.Errorf("rocketmq endpoints are required")
+	if role == "job" || isTaskConsumerRole(role) {
+		if strings.TrimSpace(c.Redis.Address) == "" {
+			return fmt.Errorf("redis.address is required for task dispatch")
 		}
-		if (strings.TrimSpace(c.RocketMQ.AccessKey) == "") != (strings.TrimSpace(c.RocketMQ.SecretKey) == "") {
-			return fmt.Errorf("rocketmq access_key and secret_key must be configured together")
-		}
-		if strings.TrimSpace(c.RocketMQ.TopicPrefix) == "" || len(c.RocketMQ.Topics) == 0 || c.RocketMQ.MaxBodyBytes <= 0 {
-			return fmt.Errorf("rocketmq topic_prefix, topics, and max_body_bytes are required")
+		if strings.TrimSpace(c.TaskDispatch.StreamPrefix) == "" || c.TaskDispatch.MaxMessageBytes <= 0 {
+			return fmt.Errorf("task_dispatch stream_prefix and max_message_bytes are required")
 		}
 	}
-	if role == "consumer" {
-		if strings.TrimSpace(c.RocketMQ.ConsumerGroup) == "" || c.RocketMQ.Concurrency <= 0 || c.RocketMQ.AwaitDuration <= 0 || c.RocketMQ.HandlerTimeout <= 0 {
-			return fmt.Errorf("rocketmq consumer_group, concurrency, await_duration, and handler_timeout are required")
+	if isTaskConsumerRole(role) {
+		if strings.TrimSpace(c.TaskDispatch.Stream) == "" ||
+			strings.TrimSpace(c.TaskDispatch.ConsumerGroup) == "" ||
+			c.TaskDispatch.Concurrency <= 0 ||
+			c.TaskDispatch.ReadBlock <= 0 ||
+			c.TaskDispatch.HandlerTimeout <= 0 ||
+			c.TaskDispatch.ReclaimInterval <= 0 ||
+			c.TaskDispatch.ClaimMinIdle <= 0 {
+			return fmt.Errorf("task_dispatch consumer settings are required")
 		}
 	}
 	return nil
+}
+
+func isTaskConsumerRole(role string) bool {
+	switch role {
+	case "collection-consumer", "transformation-consumer", "upload-consumer", "infrastructure-consumer":
+		return true
+	default:
+		return false
+	}
 }
 
 func mapEnvironmentKey(key string) string {
@@ -311,16 +314,16 @@ func mapEnvironmentKey(key string) string {
 		"FILE_STORAGE_ALIYUN_OSS_BUCKET":               "file_storage.aliyun_oss.bucket",
 		"FILE_STORAGE_ALIYUN_OSS_ACCESS_KEY":           "file_storage.aliyun_oss.access_key",
 		"FILE_STORAGE_ALIYUN_OSS_SECRET_KEY":           "file_storage.aliyun_oss.secret_key",
-		"ROCKETMQ_ENDPOINTS":                           "rocketmq.endpoints",
-		"ROCKETMQ_ACCESS_KEY":                          "rocketmq.access_key",
-		"ROCKETMQ_SECRET_KEY":                          "rocketmq.secret_key",
-		"ROCKETMQ_TOPIC_PREFIX":                        "rocketmq.topic_prefix",
-		"ROCKETMQ_CONSUMER_GROUP":                      "rocketmq.consumer_group",
-		"ROCKETMQ_AWAIT_DURATION":                      "rocketmq.await_duration",
-		"ROCKETMQ_HANDLER_TIMEOUT":                     "rocketmq.handler_timeout",
-		"ROCKETMQ_TOPICS":                              "rocketmq.topics",
-		"ROCKETMQ_CONCURRENCY":                         "rocketmq.concurrency",
-		"ROCKETMQ_MAX_BODY_BYTES":                      "rocketmq.max_body_bytes",
+		"TASK_DISPATCH_STREAM_PREFIX":                  "task_dispatch.stream_prefix",
+		"TASK_DISPATCH_STREAM":                         "task_dispatch.stream",
+		"TASK_DISPATCH_CONSUMER_GROUP":                 "task_dispatch.consumer_group",
+		"TASK_DISPATCH_CONSUMER_NAME":                  "task_dispatch.consumer_name",
+		"TASK_DISPATCH_READ_BLOCK":                     "task_dispatch.read_block",
+		"TASK_DISPATCH_HANDLER_TIMEOUT":                "task_dispatch.handler_timeout",
+		"TASK_DISPATCH_RECLAIM_INTERVAL":               "task_dispatch.reclaim_interval",
+		"TASK_DISPATCH_CLAIM_MIN_IDLE":                 "task_dispatch.claim_min_idle",
+		"TASK_DISPATCH_CONCURRENCY":                    "task_dispatch.concurrency",
+		"TASK_DISPATCH_MAX_MESSAGE_BYTES":              "task_dispatch.max_message_bytes",
 		"RESILIENCE_HTTP_RATE_LIMIT_ENABLED":           "resilience.http_rate_limit.enabled",
 		"RESILIENCE_HTTP_RATE_LIMIT_RPS":               "resilience.http_rate_limit.requests_per_second",
 		"RESILIENCE_HTTP_RATE_LIMIT_BURST":             "resilience.http_rate_limit.burst",

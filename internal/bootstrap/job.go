@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	rocketmqadapter "github.com/yuhang1130/go-service-main/internal/adapters/messaging/rocketmq"
+	redisstream "github.com/yuhang1130/go-service-main/internal/adapters/messaging/redisstream"
 	mysqladapter "github.com/yuhang1130/go-service-main/internal/adapters/mysql"
-	mysqlevent "github.com/yuhang1130/go-service-main/internal/adapters/mysql/eventing"
 	mysqlscheduler "github.com/yuhang1130/go-service-main/internal/adapters/mysql/scheduler"
+	mysqltaskdispatch "github.com/yuhang1130/go-service-main/internal/adapters/mysql/taskdispatch"
+	redisadapter "github.com/yuhang1130/go-service-main/internal/adapters/redis"
 	scheduler "github.com/yuhang1130/go-service-main/internal/adapters/scheduler/gocron"
 	"github.com/yuhang1130/go-service-main/internal/foundation/buildinfo"
 	"github.com/yuhang1130/go-service-main/internal/foundation/config"
@@ -17,6 +18,7 @@ import (
 	"github.com/yuhang1130/go-service-main/internal/foundation/lifecycle"
 	"github.com/yuhang1130/go-service-main/internal/foundation/logging"
 	"github.com/yuhang1130/go-service-main/internal/foundation/server"
+	"github.com/yuhang1130/go-service-main/internal/foundation/taskdispatch"
 )
 
 func RunJob(ctx context.Context) (runErr error) {
@@ -27,7 +29,8 @@ func RunJob(ctx context.Context) (runErr error) {
 	logger := logging.New(cfg.Logging).With("service", "go-service-main", "role", "job")
 	registry := health.New(buildinfo.Current())
 	var database *mysqladapter.Database
-	var producer *rocketmqadapter.Producer
+	var redis *redisadapter.Client
+	var producer *redisstream.Producer
 	var jobScheduler *scheduler.Scheduler
 	manager, err := newLifecycleManager(logger, cfg,
 		lifecycle.NewService("mysql", nil, func(startCtx context.Context) error {
@@ -45,22 +48,37 @@ func RunJob(ctx context.Context) (runErr error) {
 		}, func(readyCtx context.Context) error {
 			return database.Ping(readyCtx)
 		}),
-		lifecycle.NewService("rocketmq", nil, func(context.Context) error {
-			created, createErr := rocketmqadapter.NewProducer(cfg.RocketMQ, cfg.Resilience.CircuitBreaker, logger)
+		lifecycle.NewService("redis", nil, func(startCtx context.Context) error {
+			opened := redisadapter.Open(cfg.Redis)
+			if err := opened.Ping(startCtx); err != nil {
+				_ = opened.Close()
+				return err
+			}
+			redis = opened
+			return nil
+		}, func(context.Context) error {
+			if redis == nil {
+				return nil
+			}
+			return redis.Close()
+		}, func(readyCtx context.Context) error {
+			return redis.Ping(readyCtx)
+		}),
+		lifecycle.NewService("task-dispatch", []string{"redis"}, func(context.Context) error {
+			created, createErr := redisstream.NewProducer(
+				redis.Inner(), cfg.TaskDispatch, cfg.Resilience.CircuitBreaker, logger,
+			)
 			if createErr != nil {
 				return createErr
 			}
 			producer = created
-			return producer.Start()
+			return nil
 		}, func(context.Context) error {
-			if producer == nil {
-				return nil
-			}
-			return producer.Close()
+			return nil
 		}, func(readyCtx context.Context) error {
 			return producer.Ready(readyCtx)
 		}),
-		lifecycle.NewService("scheduler", []string{"mysql", "rocketmq"}, func(startCtx context.Context) error {
+		lifecycle.NewService("scheduler", []string{"mysql", "task-dispatch"}, func(startCtx context.Context) error {
 			store := mysqlscheduler.New(database.GORM(), logger)
 			created, createErr := scheduler.New(startCtx, logger, store, store)
 			if createErr != nil {
@@ -76,7 +94,9 @@ func RunJob(ctx context.Context) (runErr error) {
 			}); err != nil {
 				return fmt.Errorf("register scheduler retention: %w", err)
 			}
-			relay := rocketmqadapter.NewRelay(mysqlevent.NewOutboxStore(database.GORM()), producer, logger)
+			relay := taskdispatch.NewRelay(
+				mysqltaskdispatch.NewOutboxStore(database.GORM()), producer, logger,
+			)
 			if err := jobScheduler.Register(scheduler.Job{
 				Name: "outbox-relay", Schedule: "* * * * *", Timeout: 50 * time.Second,
 				Lease: 2 * time.Minute, Run: relay.Run,
@@ -84,7 +104,7 @@ func RunJob(ctx context.Context) (runErr error) {
 				return fmt.Errorf("register outbox relay: %w", err)
 			}
 			if err := jobScheduler.Register(scheduler.Job{
-				Name: "event-delivery-retention", Schedule: "43 3 * * *", Timeout: 30 * time.Second,
+				Name: "task-dispatch-retention", Schedule: "43 3 * * *", Timeout: 30 * time.Second,
 				Lease: 2 * time.Minute, Run: relay.Cleanup,
 			}); err != nil {
 				return fmt.Errorf("register event delivery retention: %w", err)

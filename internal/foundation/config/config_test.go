@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 	"time"
 )
@@ -19,16 +18,16 @@ server:
 logging:
   level: info
   format: text
-rocketmq:
-  endpoints: 127.0.0.1:8081
-  access_key: test
-  secret_key: test
-  topic_prefix: test
-  consumer_group: test
-  await_duration: 1s
-  topics: [events]
+task_dispatch:
+  stream_prefix: test
+  stream: material:collection:v1
+  consumer_group: test-collection
+  read_block: 1s
+  handler_timeout: 1m
+  reclaim_interval: 15s
+  claim_min_idle: 30s
   concurrency: 1
-  max_body_bytes: 1024
+  max_message_bytes: 1024
 `)
 	if err := os.WriteFile(path, contents, 0o600); err != nil {
 		t.Fatal(err)
@@ -49,11 +48,12 @@ rocketmq:
 	t.Setenv("APP_RESILIENCE_CIRCUIT_BREAKER_HALF_OPEN_MAX", "2")
 	t.Setenv("APP_IDENTITY_LOGIN_RATE_LIMIT", "15")
 	t.Setenv("APP_IDENTITY_LOGIN_RATE_WINDOW", "2m")
-	t.Setenv("APP_ROCKETMQ_AWAIT_DURATION", "6s")
-	t.Setenv("APP_ROCKETMQ_HANDLER_TIMEOUT", "35s")
-	t.Setenv("APP_ROCKETMQ_TOPICS", "events,audit")
-	t.Setenv("APP_ROCKETMQ_CONCURRENCY", "12")
-	t.Setenv("APP_ROCKETMQ_MAX_BODY_BYTES", "2097152")
+	t.Setenv("APP_TASK_DISPATCH_READ_BLOCK", "6s")
+	t.Setenv("APP_TASK_DISPATCH_HANDLER_TIMEOUT", "35m")
+	t.Setenv("APP_TASK_DISPATCH_RECLAIM_INTERVAL", "20s")
+	t.Setenv("APP_TASK_DISPATCH_CLAIM_MIN_IDLE", "45s")
+	t.Setenv("APP_TASK_DISPATCH_CONCURRENCY", "12")
+	t.Setenv("APP_TASK_DISPATCH_MAX_MESSAGE_BYTES", "8192")
 	cfg := Defaults()
 	if err := Load(path, "api", &cfg); err != nil {
 		t.Fatal(err)
@@ -76,11 +76,14 @@ rocketmq:
 	if cfg.Identity.LoginRateLimit != 15 || cfg.Identity.LoginRateWindow != 2*time.Minute {
 		t.Fatalf("identity login rate = %d/%s", cfg.Identity.LoginRateLimit, cfg.Identity.LoginRateWindow)
 	}
-	if cfg.RocketMQ.AwaitDuration != 6*time.Second || cfg.RocketMQ.HandlerTimeout != 35*time.Second {
-		t.Fatalf("RocketMQ durations = %s/%s", cfg.RocketMQ.AwaitDuration, cfg.RocketMQ.HandlerTimeout)
+	if cfg.TaskDispatch.ReadBlock != 6*time.Second ||
+		cfg.TaskDispatch.HandlerTimeout != 35*time.Minute ||
+		cfg.TaskDispatch.ReclaimInterval != 20*time.Second ||
+		cfg.TaskDispatch.ClaimMinIdle != 45*time.Second {
+		t.Fatalf("task dispatch durations = %#v", cfg.TaskDispatch)
 	}
-	if !reflect.DeepEqual(cfg.RocketMQ.Topics, []string{"events", "audit"}) || cfg.RocketMQ.Concurrency != 12 || cfg.RocketMQ.MaxBodyBytes != 2097152 {
-		t.Fatalf("RocketMQ overrides = topics %v, concurrency %d, max body %d", cfg.RocketMQ.Topics, cfg.RocketMQ.Concurrency, cfg.RocketMQ.MaxBodyBytes)
+	if cfg.TaskDispatch.Concurrency != 12 || cfg.TaskDispatch.MaxMessageBytes != 8192 {
+		t.Fatalf("task dispatch overrides = %#v", cfg.TaskDispatch)
 	}
 }
 
@@ -89,13 +92,13 @@ func TestValidateRequiresOnlyRoleCapabilities(t *testing.T) {
 	cfg := Defaults()
 	cfg.MySQL.DSN = "app:app@tcp(localhost:3306)/app"
 	cfg.Redis.Address = "localhost:6379"
-	cfg.RocketMQ = RocketMQ{}
+	cfg.TaskDispatch = TaskDispatch{}
 
 	if err := cfg.Validate("api"); err != nil {
-		t.Fatalf("api should require MySQL and Redis but not RocketMQ configuration: %v", err)
+		t.Fatalf("api should require MySQL and Redis but not task dispatch configuration: %v", err)
 	}
 	if err := cfg.Validate("job"); err == nil {
-		t.Fatal("job should require RocketMQ producer configuration")
+		t.Fatal("job should require task dispatch publisher configuration")
 	}
 }
 
@@ -103,24 +106,27 @@ func TestValidateConsumerRequiresConsumerSettings(t *testing.T) {
 	t.Parallel()
 	cfg := Defaults()
 	cfg.MySQL.DSN = "app:app@tcp(localhost:3306)/app"
-	cfg.RocketMQ = RocketMQ{
-		Endpoints:   "localhost:8081",
-		TopicPrefix: "test", Topics: []string{"events"}, MaxBodyBytes: 1024,
-	}
+	cfg.Redis.Address = "localhost:6379"
+	cfg.TaskDispatch = TaskDispatch{StreamPrefix: "test", MaxMessageBytes: 1024}
 
-	if err := cfg.Validate("consumer"); err == nil {
-		t.Fatal("consumer should require consumer_group, concurrency, and await_duration")
+	if err := cfg.Validate("collection-consumer"); err == nil {
+		t.Fatal("consumer should require stream, group, concurrency, and durations")
 	}
 }
 
 func TestRepositoryRoleConfigsValidate(t *testing.T) {
-	for _, role := range []string{"api", "job", "consumer"} {
+	for _, role := range []string{
+		"api",
+		"job",
+		"collection-consumer",
+		"transformation-consumer",
+		"upload-consumer",
+		"infrastructure-consumer",
+	} {
 		role := role
 		t.Run(role, func(t *testing.T) {
 			t.Setenv("APP_MYSQL_DSN", "app:app@tcp(localhost:3306)/app?parseTime=true&loc=UTC")
-			if role == "api" {
-				t.Setenv("APP_REDIS_ADDRESS", "localhost:6379")
-			}
+			t.Setenv("APP_REDIS_ADDRESS", "localhost:6379")
 			cfg := Defaults()
 			path := filepath.Join("..", "..", "..", "configs", role+".yaml")
 			if err := Load(path, role, &cfg); err != nil {

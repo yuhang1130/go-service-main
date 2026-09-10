@@ -29,33 +29,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-  rocketmq-namesrv:
-    image: apache/rocketmq:5.5.0
-    command: sh mqnamesrv
-
-  rocketmq-broker:
-    image: apache/rocketmq:5.5.0
-    command: sh mqbroker -c /home/rocketmq/broker.conf
-    depends_on:
-      - rocketmq-namesrv
-    environment:
-      NAMESRV_ADDR: rocketmq-namesrv:9876
-    volumes:
-      - ./rocketmq/broker.conf:/home/rocketmq/broker.conf:ro
-
-  rocketmq-proxy:
-    image: apache/rocketmq:5.5.0
-    command: sh mqproxy -pc /home/rocketmq/rmq-proxy.json
-    depends_on:
-      - rocketmq-namesrv
-      - rocketmq-broker
-    restart: on-failure
-    environment:
-      NAMESRV_ADDR: rocketmq-namesrv:9876
-    ports:
-      - "18081:18081"
-    volumes:
-      - ./rocketmq/rmq-proxy.json:/home/rocketmq/rmq-proxy.json:ro
 
 volumes:
   mysql-data:

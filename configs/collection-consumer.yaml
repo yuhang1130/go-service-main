@@ -1,6 +1,6 @@
 environment: local
 server:
-  management_port: 9091
+  management_port: 9092
   read_header_timeout: 5s
   read_timeout: 10s
   write_timeout: 10s
@@ -11,11 +11,6 @@ server:
 logging:
   level: info
   format: text
-resilience:
-  circuit_breaker:
-    failure_threshold: 5
-    open_timeout: 30s
-    half_open_max_requests: 1
 mysql:
   dsn: ""
   max_open_conns: 15
@@ -27,8 +22,16 @@ redis:
   password: ""
   database: 0
   dial_timeout: 3s
-  read_timeout: 2s
+  read_timeout: 10s
   write_timeout: 2s
 task_dispatch:
   stream_prefix: go-service-main
+  stream: material:collection:v1
+  consumer_group: go-service-main-material-collection-v1
+  consumer_name: ""
+  read_block: 5s
+  handler_timeout: 2h
+  reclaim_interval: 30s
+  claim_min_idle: 1m
+  concurrency: 2
   max_message_bytes: 4096
